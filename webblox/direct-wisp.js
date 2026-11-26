@@ -176,12 +176,7 @@ class DirectWispWebSocket extends EventTarget {
 
     let tcp;
     try {
-      tcp = new globalThis.TCPSocket(hostname, port, {
-        noDelay: true,
-        sendBufferSize: 262144,
-        receiveBufferSize: 262144,
-        keepAliveDelay: 30000,
-      });
+      tcp = new globalThis.TCPSocket(hostname, port, { noDelay: true });
     } catch {
       try {
         tcp = new globalThis.TCPSocket(hostname, port);

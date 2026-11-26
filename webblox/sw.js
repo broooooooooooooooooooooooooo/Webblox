@@ -227,47 +227,32 @@ function reply(status, statusText, headers, body) {
 
 // A page of ours in this scope. Requests from the engine's workers carry the
 // worker's client id, so fall back to any window.
-let cachedRelayPage = null;
 async function relayPage(clientId) {
-  if (cachedRelayPage) return cachedRelayPage;
   const own = clientId ? await self.clients.get(clientId) : null;
-  if (own?.type === "window") {
-    cachedRelayPage = own;
-    return own;
-  }
+  if (own?.type === "window") return own;
   const pages = await self.clients.matchAll({ type: "window" });
   const page = pages.find((client) => client.frameType === "top-level") ?? pages[0];
   if (!page) throw new Error("no page to relay through");
-  cachedRelayPage = page;
   return page;
 }
 
 async function relay(clientId, message) {
-  let page = await relayPage(clientId);
-  const send = (target) =>
-    new Promise((resolve, reject) => {
-      const channel = new MessageChannel();
-      const timer = setTimeout(() => {
-        channel.port1.close();
-        reject(new Error("relay timed out"));
-      }, RELAY_TIMEOUT_MS);
-      channel.port1.onmessage = ({ data }) => {
-        clearTimeout(timer);
-        channel.port1.close();
-        if (data.ok) resolve(data);
-        else reject(new Error(data.error));
-      };
-      const transfer = message.body ? [channel.port2, message.body] : [channel.port2];
-      target.postMessage({ type: "blox-fetch", ...message }, transfer);
-    });
-  try {
-    return await send(page);
-  } catch (error) {
-    cachedRelayPage = null;
-    if (error?.message === "relay timed out") throw error;
-    page = await relayPage(clientId);
-    return send(page);
-  }
+  const page = await relayPage(clientId);
+  return new Promise((resolve, reject) => {
+    const channel = new MessageChannel();
+    const timer = setTimeout(() => {
+      channel.port1.close();
+      reject(new Error("relay timed out"));
+    }, RELAY_TIMEOUT_MS);
+    channel.port1.onmessage = ({ data }) => {
+      clearTimeout(timer);
+      channel.port1.close();
+      if (data.ok) resolve(data);
+      else reject(new Error(data.error));
+    };
+    const transfer = message.body ? [channel.port2, message.body] : [channel.port2];
+    page.postMessage({ type: "blox-fetch", ...message }, transfer);
+  });
 }
 
 // ---- Game asset cache -----------------------------------------------------------

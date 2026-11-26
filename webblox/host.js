@@ -683,10 +683,11 @@ const RENDERER_KEY = "blox.renderer";
 // ?renderScale=, so 0.75 draws 56% of the pixels and 0.5 a quarter, which
 // eases the GPU and its memory under WebGL and WebGPU alike.
 const SCALE_KEY = "blox.renderScale";
-const SCALES = ["1", "0.75", "0.5"];
+const SCALES = ["1", "0.75", "0.5", "0.4"];
 const THEME_KEY = "blox.theme";
 const SHOW_FPS_KEY = "blox.showFps";
 const PERF_MODE_KEY = "blox.perfMode";
+const ULTRA_FPS_KEY = "blox.ultraFps";
 const RECENT_KEY = "blox.recentPlaces";
 
 function readRecentPlaces() {
@@ -716,44 +717,93 @@ function clearRecentPlaces() {
   } catch {}
 }
 
-async function fetchRecentGames() {
-  let recent = readRecentPlaces();
-  if (!recent.length) {
-    const stats = await askWorker({ type: "blox-cache-stats" }).catch(() => null);
-    if (stats?.top?.length) {
-      recent = stats.top.map((v) => ({ placeId: String(v.placeId), last: v.last || 0 }));
-      try {
-        localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
-      } catch {}
+async function fetchRobloxContinueGames() {
+  try {
+    const res = await robloxPostWithCsrf("https://apis.roblox.com/discovery-api/omni-recommendation", {
+      pageType: "Home",
+      sessionId: crypto.randomUUID(),
+    });
+    const data = res?.json;
+    const sorts = Array.isArray(data?.sorts) ? data.sorts : [];
+    const continueSort =
+      sorts.find((s) => s?.topicId === 100000003) ??
+      sorts.find((s) => /continue|continuar|recent|reciente/i.test(String(s?.topic || s?.sortId || "")));
+    if (!continueSort || !Array.isArray(continueSort.recommendationList)) return [];
+
+    const metaGames = data?.contentMetadata?.Game ?? {};
+    const list = [];
+    for (const rec of continueSort.recommendationList) {
+      const uid = rec?.contentId;
+      const g = uid != null ? metaGames[String(uid)] : null;
+      if (!g?.rootPlaceId) continue;
+      list.push({
+        placeId: String(g.rootPlaceId),
+        universeId: Number(uid),
+        name: g.name || `Juego ${g.rootPlaceId}`,
+        creator: "",
+        players: Number.isFinite(g.playerCount) ? g.playerCount : undefined,
+      });
+      if (list.length >= 12) break;
+    }
+    if (!list.length) return [];
+
+    const universeIds = [...new Set(list.map((g) => g.universeId).filter(Boolean))];
+    const iconsRes = await robloxJson(
+      `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds.join(",")}&size=150x150&format=Webp&isCircular=false`,
+    ).catch(() => ({ data: [] }));
+    const iconOf = new Map((iconsRes?.data ?? []).map((i) => [i.targetId, i.imageUrl]));
+    return list.map((g) => ({ ...g, icon: iconOf.get(g.universeId) }));
+  } catch {
+    return [];
+  }
+}
+
+async function fetchRecentGames(signedIn = false) {
+  const seen = new Set();
+  const combined = [];
+
+  const localRecent = readRecentPlaces();
+  if (localRecent.length) {
+    const ids = localRecent.map((r) => r.placeId).slice(0, 12);
+    const details = await robloxJson(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${ids.join(",")}`).catch(() => []);
+    const detailMap = new Map((Array.isArray(details) ? details : []).map((d) => [String(d.placeId), d]));
+    const universeIds = [...new Set([...detailMap.values()].map((d) => d.universeId).filter(Boolean))];
+    let iconOf = new Map();
+    let playersOf = new Map();
+    if (universeIds.length) {
+      const [iconsRes, gamesRes] = await Promise.all([
+        robloxJson(
+          `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds.join(",")}&size=150x150&format=Webp&isCircular=false`,
+        ).catch(() => ({ data: [] })),
+        robloxJson(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(",")}`).catch(() => ({ data: [] })),
+      ]);
+      iconOf = new Map((iconsRes?.data ?? []).map((i) => [i.targetId, i.imageUrl]));
+      playersOf = new Map((gamesRes?.data ?? []).map((g) => [g.id, g.playing]));
+    }
+    for (const id of ids) {
+      const d = detailMap.get(id);
+      if (!d || seen.has(id)) continue;
+      seen.add(id);
+      combined.push({
+        placeId: id,
+        name: d.name,
+        creator: d.builder,
+        players: playersOf.get(d.universeId),
+        icon: iconOf.get(d.universeId),
+      });
     }
   }
-  const ids = recent.map((r) => r.placeId).slice(0, 12);
-  if (!ids.length) return [];
 
-  const details = await robloxJson(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${ids.join(",")}`);
-  const detailMap = new Map((Array.isArray(details) ? details : []).map((d) => [String(d.placeId), d]));
-  const universeIds = [...new Set([...detailMap.values()].map((d) => d.universeId).filter(Boolean))];
-  if (!universeIds.length) return [];
+  if (signedIn) {
+    const cloudGames = await fetchRobloxContinueGames();
+    for (const g of cloudGames) {
+      if (seen.has(g.placeId)) continue;
+      seen.add(g.placeId);
+      combined.push(g);
+    }
+  }
 
-  const [iconsRes, gamesRes] = await Promise.all([
-    robloxJson(
-      `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds.join(",")}&size=150x150&format=Webp&isCircular=false`,
-    ).catch(() => ({ data: [] })),
-    robloxJson(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(",")}`).catch(() => ({ data: [] })),
-  ]);
-  const iconOf = new Map((iconsRes?.data ?? []).map((i) => [i.targetId, i.imageUrl]));
-  const playersOf = new Map((gamesRes?.data ?? []).map((g) => [g.id, g.playing]));
-
-  return ids
-    .map((id) => detailMap.get(id))
-    .filter(Boolean)
-    .map((d) => ({
-      placeId: String(d.placeId),
-      name: d.name,
-      creator: d.builder,
-      players: playersOf.get(d.universeId),
-      icon: iconOf.get(d.universeId),
-    }));
+  return combined.slice(0, 12);
 }
 
 function savedScale() {
@@ -821,6 +871,7 @@ function saveBool(key, value) {
 
 const savedShowFps = () => savedBool(SHOW_FPS_KEY, false);
 const savedPerfMode = () => savedBool(PERF_MODE_KEY, true);
+const savedUltraFps = () => savedBool(ULTRA_FPS_KEY, false);
 
 function play(placeId, serverId = null) {
   saveRecentPlace(placeId);
@@ -861,16 +912,19 @@ async function fetchFriends(userId) {
   const list = Array.isArray(friendsRes?.data) ? friendsRes.data : [];
   if (!list.length) return [];
 
+  const userMap = new Map();
   const presenceMap = new Map();
   const avatarMap = new Map();
   for (let i = 0; i < list.length; i += 50) {
     const chunkIds = list.slice(i, i + 50).map((f) => f.id);
-    const [presRes, thumbRes] = await Promise.all([
+    const [usersRes, presRes, thumbRes] = await Promise.all([
+      robloxPostWithCsrf("https://users.roblox.com/v1/users", { userIds: chunkIds, excludeBannedUsers: false }).catch(() => ({ json: null })),
       robloxPostWithCsrf("https://presence.roblox.com/v1/presence/users", { userIds: chunkIds }).catch(() => ({ json: null })),
       robloxJson(
         `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${chunkIds.join(",")}&size=150x150&format=Png&isCircular=true`,
       ).catch(() => ({ data: [] })),
     ]);
+    for (const u of usersRes?.json?.data ?? []) userMap.set(u.id, u);
     for (const p of presRes?.json?.userPresences ?? []) presenceMap.set(p.userId, p);
     for (const t of thumbRes?.data ?? []) if (t.imageUrl) avatarMap.set(t.targetId, t.imageUrl);
   }
@@ -878,15 +932,18 @@ async function fetchFriends(userId) {
   const stateOrder = { 2: 0, 1: 1, 3: 2, 0: 3 };
   return list
     .map((f) => {
+      const u = userMap.get(f.id);
       const p = presenceMap.get(f.id);
       const type = p?.userPresenceType ?? 0;
       const rawPlace = p?.placeId ?? p?.rootPlaceId ?? null;
       const placeId = rawPlace && /^[1-9]\d{0,18}$/.test(String(rawPlace)) ? String(rawPlace) : null;
       const gameId = typeof p?.gameId === "string" && /^[A-Za-z0-9-]{1,64}$/.test(p.gameId) ? p.gameId : null;
+      const username = u?.name || f.name || `user_${f.id}`;
+      const displayName = u?.displayName || f.displayName || username;
       return {
         id: f.id,
-        name: f.name,
-        displayName: f.displayName || f.name,
+        name: username,
+        displayName,
         avatar: avatarMap.get(f.id) || "",
         type,
         location: p?.lastLocation || "",
@@ -972,12 +1029,12 @@ function showLauncher() {
       <p class="launcher-status" role="status"></p>
       <ul class="launcher-games"></ul>
     </section>
-    <section class="glass-card recent-card" hidden>
+    <section class="glass-card recent-card">
       <div class="section-head">
         <h2>Juegos recientes</h2>
-        <button type="button" class="ghost-btn recent-clear">Limpiar</button>
+        <button type="button" class="ghost-btn recent-clear">Limpiar historial</button>
       </div>
-      <p class="friends-status recent-status"></p>
+      <p class="friends-status recent-status">Cargando recientes…</p>
       <ul class="launcher-games recent-games"></ul>
     </section>
     <section class="glass-card friends-card" hidden>
@@ -1007,11 +1064,13 @@ function showLauncher() {
         <label><input type="radio" name="scale" value="1"> Alta</label>
         <label><input type="radio" name="scale" value="0.75"> Media</label>
         <label><input type="radio" name="scale" value="0.5"> Rendimiento</label>
+        <label><input type="radio" name="scale" value="0.4"> Muy baja</label>
       </fieldset>
       <p class="renderer-hint quality-hint"></p>
       <div class="toggle-row">
         <label class="toggle-pill"><input type="checkbox" id="toggleFps"> Mostrar FPS en una esquina</label>
-        <label class="toggle-pill"><input type="checkbox" id="togglePerf"> Optimizar GPU y HiDPI (más FPS)</label>
+        <label class="toggle-pill"><input type="checkbox" id="togglePerf"> Optimizar GPU y HiDPI</label>
+        <label class="toggle-pill"><input type="checkbox" id="toggleUltra"> Modo Ultra FPS (sin sombras, PostFX ni hierba)</label>
       </div>
     </section>
     <section class="glass-card downloader" aria-labelledby="downloader-title">
@@ -1024,7 +1083,6 @@ function showLauncher() {
 
   const accountLabel = launcher.querySelector(".account-label");
   const accountBtn = launcher.querySelector(".account-btn");
-  const recentCard = launcher.querySelector(".recent-card");
   const recentStatus = launcher.querySelector(".recent-status");
   const recentList = launcher.querySelector(".recent-games");
   const recentClear = launcher.querySelector(".recent-clear");
@@ -1035,30 +1093,26 @@ function showLauncher() {
   let activeUserId = null;
 
   const loadRecent = async () => {
-    const localIds = readRecentPlaces();
-    if (!localIds.length && !activeUserId) {
-      recentCard.hidden = true;
-      return;
-    }
-    recentCard.hidden = false;
     recentStatus.textContent = "Cargando recientes…";
     try {
-      const games = await fetchRecentGames();
+      const games = await fetchRecentGames(Boolean(activeUserId));
       if (!games.length) {
-        recentCard.hidden = true;
+        recentStatus.textContent = activeUserId
+          ? "Aún no hay juegos recientes. Abre cualquier juego para que aparezca aquí."
+          : "Inicia sesión o abre un juego para ver tus recientes aquí.";
+        recentList.replaceChildren();
         return;
       }
       recentStatus.textContent = "";
       recentList.replaceChildren(...games.map(gameItem));
     } catch {
-      recentCard.hidden = true;
+      recentStatus.textContent = "No se pudieron cargar los juegos recientes.";
     }
   };
 
   recentClear.addEventListener("click", () => {
     clearRecentPlaces();
-    recentList.replaceChildren();
-    recentCard.hidden = true;
+    void loadRecent();
   });
 
   const loadFriends = async () => {
@@ -1148,7 +1202,8 @@ function showLauncher() {
   const qualityHints = {
     "1": "Resolución completa.",
     "0.75": "Dibuja ~56 % de los píxeles: más FPS y menos consumo de memoria gráfica.",
-    "0.5": "Dibuja 25 % de los píxeles: máximo rendimiento.",
+    "0.5": "Dibuja 25 % de los píxeles: gran aumento de FPS.",
+    "0.4": "Dibuja 16 % de los píxeles: máximo rendimiento en portátiles / GPU integrada.",
   };
   const scale = savedScale();
   for (const radio of launcher.querySelectorAll('input[name="scale"]')) {
@@ -1167,6 +1222,10 @@ function showLauncher() {
   const perfToggle = launcher.querySelector("#togglePerf");
   perfToggle.checked = savedPerfMode();
   perfToggle.addEventListener("change", () => saveBool(PERF_MODE_KEY, perfToggle.checked));
+
+  const ultraToggle = launcher.querySelector("#toggleUltra");
+  ultraToggle.checked = savedUltraFps();
+  ultraToggle.addEventListener("change", () => saveBool(ULTRA_FPS_KEY, ultraToggle.checked));
 
   void showCacheLine(launcher);
   if (!COMPAT.ok) {
@@ -1730,23 +1789,20 @@ function startFpsHud() {
     } catch {}
   }
 
-  // 2. WebGL / WebGL2 frames (mark frame dirty on real draw/clear calls)
+  // 2. WebGL / WebGL2 frames (wrap only clear() — never per-draw-call methods)
   for (const Ctx of [globalThis.WebGL2RenderingContext, globalThis.WebGLRenderingContext]) {
     const proto = Ctx?.prototype;
-    if (!proto) continue;
-    for (const method of ["drawElements", "drawArrays", "drawElementsInstanced", "drawArraysInstanced", "clear"]) {
-      const orig = proto[method];
-      if (typeof orig !== "function" || orig.__bloxFps) continue;
-      const wrapped = function (...args) {
-        sawEngineRender = true;
-        glDrew = true;
-        return orig.apply(this, args);
-      };
-      wrapped.__bloxFps = true;
-      try {
-        proto[method] = wrapped;
-      } catch {}
-    }
+    if (!proto || typeof proto.clear !== "function" || proto.clear.__bloxFps) continue;
+    const orig = proto.clear;
+    const wrapped = function (...args) {
+      sawEngineRender = true;
+      glDrew = true;
+      return orig.apply(this, args);
+    };
+    wrapped.__bloxFps = true;
+    try {
+      proto.clear = wrapped;
+    } catch {}
   }
 
   // 3. OffscreenCanvas worker frames (if engine renders inside a Worker)
@@ -1804,6 +1860,7 @@ async function boot() {
   // place id" and exits, so pick one here first.
   if (!joining) return showLauncher();
   stopThemeBackground(document.getElementById("theme-bg"));
+  await askWorker({ type: "blox-perf-flags", perfMode: savedPerfMode(), ultraFps: savedUltraFps() });
   applyPerformanceOptimizations();
   startFpsHud();
   say("Comprobando tu sesión de Roblox…");

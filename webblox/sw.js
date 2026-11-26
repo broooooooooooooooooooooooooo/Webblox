@@ -199,12 +199,34 @@ async function crossOrigin(request, clientId) {
   }
 }
 
+// Performance FFlags toggled from the launcher (saved via blox-perf-flags message).
+let perfFlags = { perfMode: true, ultraFps: false };
+
 // Lets the page pick the renderer with ?renderer=webgl|webgpu (WasmPlayer.js
 // only reads it with this flag on); host.js uses it to keep old Chrome off WebGPU.
 function withLocalFlags(text) {
   try {
     const flags = JSON.parse(text);
-    if (flags?.applicationSettings) flags.applicationSettings.FFlagWebClientRenderQueryParams = "True";
+    const s = flags?.applicationSettings;
+    if (s) {
+      s.FFlagWebClientRenderQueryParams = "True";
+      if (perfFlags.perfMode) {
+        s.DFFlagDisableDPIScale = "True";
+        s.DFIntTaskSchedulerTargetFps = "240";
+        s.FFlagDebugDisableTelemetryV2Event = "True";
+        s.FFlagDebugDisableTelemetryV2Stat = "True";
+        s.FFlagDebugDisableTelemetryV2Counter = "True";
+      }
+      if (perfFlags.ultraFps) {
+        s.FIntRenderShadowIntensity = "0";
+        s.FFlagDisablePostFx = "True";
+        s.DFFlagTextureQualityOverrideEnabled = "True";
+        s.DFIntTextureQualityOverride = "0";
+        s.FIntFRMMinGrassDistance = "0";
+        s.FIntFRMMaxGrassDistance = "0";
+        s.DFIntDebugFRMQualityLevelOverride = "1";
+      }
+    }
     return JSON.stringify(flags);
   } catch {
     return text;
@@ -434,7 +456,11 @@ async function clearGameAssets() {
 self.addEventListener("message", (event) => {
   const message = event.data;
   const answer = (value) => event.ports[0]?.postMessage(value);
-  if (message?.type === "blox-visit") event.waitUntil(recordVisit(message.placeId).catch(() => {}));
+  if (message?.type === "blox-perf-flags") {
+    perfFlags = { perfMode: Boolean(message.perfMode), ultraFps: Boolean(message.ultraFps) };
+    answer(true);
+  }
+  else if (message?.type === "blox-visit") event.waitUntil(recordVisit(message.placeId).catch(() => {}));
   else if (message?.type === "blox-cache-stats") event.waitUntil(cacheStats().then(answer, () => answer(null)));
   else if (message?.type === "blox-cache-trim") event.waitUntil(trimGameAssets().then(() => answer(true)));
   else if (message?.type === "blox-cache-clear") event.waitUntil(clearGameAssets().then(() => answer(true), () => answer(false)));

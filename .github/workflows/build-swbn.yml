@@ -55,5 +55,6 @@ jobs:
         run: |
           TAG="iwa-v1.0.${{ github.run_number }}"
           gh release create "$TAG" swbn/dist/webblox.swbn \
+            --latest \
             --title "Webblox IWA $TAG" \
             --notes "Paquete autónomo .swbn para Chrome con Direct Sockets (sin backend externo)."

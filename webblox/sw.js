@@ -6,8 +6,21 @@
 // Same-origin requests are left alone: the server already sends the
 // cross-origin isolation headers the engine's SharedArrayBuffer needs.
 
+// URL pública de Cloudflare R2 (u otro CDN) donde está alojado el contenido de
+// vendor/webblox/engine/ (sin barra final, ej. "https://pub-xxxx.r2.dev").
+// Si se deja vacío, el motor se descarga desde el mismo origen (/blox/engine/).
+const ENGINE_CDN = "";
+
 const SCOPE = new URL(self.registration.scope);
-const PINNED_FLAGS = new URL("engine/PinnedFlags.json", SCOPE).href;
+const ENGINE_PREFIX = `${SCOPE.pathname}engine/`;
+const ENGINE_CDN_BASE = ENGINE_CDN.replace(/\/+$/, "");
+
+function engineUrl(relative) {
+  const clean = relative.replace(/^\/+/, "");
+  return ENGINE_CDN_BASE ? `${ENGINE_CDN_BASE}/${clean}` : new URL(`engine/${clean}`, SCOPE).href;
+}
+
+const PINNED_FLAGS = engineUrl("PinnedFlags.json");
 // WasmPlayer.js loads the engine's flags from here. The engine on disk is one
 // pinned version, so it gets the flags fetched alongside it, not whatever
 // Roblox's live flags are for a newer engine.
@@ -23,8 +36,14 @@ self.addEventListener("fetch", (event) => {
   if (!/^https?:/.test(request.url)) return;
   const url = new URL(request.url);
   if (url.origin === self.location.origin) {
+    if (ENGINE_CDN_BASE && url.pathname.startsWith(ENGINE_PREFIX) && (request.method === "GET" || request.method === "HEAD")) {
+      const version = request.method === "GET" ? ENGINE_VERSIONED.exec(url.pathname) : null;
+      if (version) event.respondWith(cachedEngineFile(request, version[1], version[2]));
+      else event.respondWith(fetchFromEngineCdn(request, url.pathname.slice(ENGINE_PREFIX.length)));
+      return;
+    }
     const version = request.method === "GET" ? ENGINE_VERSIONED.exec(url.pathname) : null;
-    if (version) event.respondWith(cachedEngineFile(request, version[1]));
+    if (version) event.respondWith(cachedEngineFile(request, version[1], version[2]));
     return;
   }
   event.respondWith(crossOrigin(request, event.clientId));
@@ -36,9 +55,27 @@ self.addEventListener("fetch", (event) => {
 // (x-blox-size) when stored and when used; a short or missing copy is dropped
 // and fetched again, and caches of other versions are deleted.
 
-const ENGINE_VERSIONED = new RegExp(`^${SCOPE.pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}engine/v/(version-[0-9a-f]{16})/`);
+const ENGINE_VERSIONED = new RegExp(`^${SCOPE.pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}engine/v/(version-[0-9a-f]{16})/(.+)$`);
 const CACHE_PREFIX = "blox-engine-";
 const pruned = new Set();
+
+function isolatedCdnResponse(response, relative) {
+  const headers = new Headers(response.headers);
+  headers.set("cross-origin-opener-policy", "same-origin");
+  headers.set("cross-origin-embedder-policy", "require-corp");
+  headers.set("cross-origin-resource-policy", "same-origin");
+  if (!headers.get("content-type") || headers.get("content-type") === "application/octet-stream") {
+    if (relative.endsWith(".wasm")) headers.set("content-type", "application/wasm");
+    else if (relative.endsWith(".js") || relative.endsWith(".mjs")) headers.set("content-type", "text/javascript; charset=utf-8");
+    else if (relative.endsWith(".json")) headers.set("content-type", "application/json; charset=utf-8");
+  }
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
+async function fetchFromEngineCdn(request, relative) {
+  const upstream = await fetch(engineUrl(relative), { method: request.method, mode: "cors", cache: "no-store" });
+  return isolatedCdnResponse(upstream, relative);
+}
 
 async function intact(response) {
   if (!response?.ok) return false;
@@ -63,7 +100,7 @@ let outdatedAnnounced = false;
 async function announceIfOutdated(upload) {
   if (outdatedAnnounced) return;
   try {
-    const live = await fetch(new URL("engine/version.json", SCOPE), { cache: "no-store" });
+    const live = await fetch(engineUrl("version.json"), { cache: "no-store" });
     if (!live.ok || (await live.json()).clientVersionUpload === upload) return;
   } catch {
     return;
@@ -72,7 +109,32 @@ async function announceIfOutdated(upload) {
   for (const page of await self.clients.matchAll({ type: "window" })) page.postMessage({ type: "blox-engine-outdated" });
 }
 
-async function cachedEngineFile(request, upload) {
+async function reassembleChunkedFile(baseUrl) {
+  const manifestRes = await fetch(`${baseUrl}.parts.json`, { credentials: "same-origin", cache: "no-cache" });
+  if (!manifestRes.ok) return manifestRes;
+  const manifest = await manifestRes.json();
+  const partBase = new URL("./", baseUrl);
+  const blobs = await Promise.all(
+    manifest.parts.map(async (part) => {
+      const res = await fetch(new URL(part, partBase).href, { credentials: "same-origin", cache: "no-cache" });
+      if (!res.ok) throw new Error(`Failed to fetch chunk ${part}: HTTP ${res.status}`);
+      return res.blob();
+    }),
+  );
+  const combined = new Blob(blobs, { type: manifest.contentType || "application/wasm" });
+  const headers = new Headers({
+    "content-type": manifest.contentType || "application/wasm",
+    "content-length": String(combined.size),
+    "cache-control": "public, max-age=31536000, immutable",
+    "cross-origin-opener-policy": "same-origin",
+    "cross-origin-embedder-policy": "require-corp",
+    "cross-origin-resource-policy": "same-origin",
+    "x-blox-size": String(manifest.size || combined.size),
+  });
+  return new Response(combined, { status: 200, headers });
+}
+
+async function cachedEngineFile(request, upload, relative) {
   const name = `${CACHE_PREFIX}${upload}`;
   let cache = null;
   try {
@@ -87,7 +149,12 @@ async function cachedEngineFile(request, upload) {
   } catch (error) {
     console.warn("[blox] engine cache unavailable:", error);
   }
-  const response = await fetch(request.url, { credentials: "same-origin", cache: "no-cache" });
+  let response = ENGINE_CDN_BASE
+    ? isolatedCdnResponse(await fetch(engineUrl(relative), { mode: "cors", cache: "no-cache" }), relative)
+    : await fetch(request.url, { credentials: "same-origin", cache: "no-cache" });
+  if (!ENGINE_CDN_BASE && response.status === 404 && response.headers.get("x-blox-chunked") === "1") {
+    response = await reassembleChunkedFile(request.url);
+  }
   // The server refuses a version it no longer runs: tell the page, whose
   // engine would otherwise fail on the next file it asks for.
   if (response.status === 404) void announceIfOutdated(upload);

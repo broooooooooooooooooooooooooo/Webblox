@@ -7,6 +7,7 @@
     "start": "bun server.ts",
     "fetch:webblox": "node scripts/fetch-webblox.mjs",
     "build:proxy": "bun build integrations/scramjet/plugin.ts --target browser --format esm --outfile proxy/launch-plugin.mjs && bun run scripts/copy-scramjet-assets.mjs && bun run scripts/precompress.mjs",
+    "build:swbn": "bun swbn/build-swbn.mjs",
     "test": "bun test",
     "typecheck": "tsc"
   },
@@ -18,6 +19,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.13",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wbn": "^0.0.10",
+    "wbn-sign": "^0.3.3"
   }
 }

@@ -10,7 +10,7 @@ import { MIME_TYPES, serveStatic } from "./static";
 
 export const BLOX_PREFIX = "/blox/";
 
-const HOST_FILES: Record<string, true> = { "index.html": true, "host.js": true, "host.css": true, "sw.js": true };
+const HOST_FILES: Record<string, true> = { "index.html": true, "host.js": true, "host.css": true, "sw.js": true, "compat.js": true, "direct-wisp.js": true };
 // Engine content paths as the metadata list writes them; anything else is
 // not something the engine asks for.
 const ENGINE_PATH = /^[A-Za-z0-9_@ .()+-]+(?:\/[A-Za-z0-9_@ .()+-]+)*$/;

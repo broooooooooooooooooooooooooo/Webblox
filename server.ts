@@ -21,6 +21,9 @@ const HOST = process.env.HOST || "127.0.0.1";
 const ROOT_FILES: Record<string, string> = {
   "/": "proxy/index.html",
   "/index.html": "proxy/index.html",
+  "/compat.js": "proxy/compat.js",
+  "/app.js": "proxy/app.js",
+  "/direct-wisp.js": "webblox/direct-wisp.js",
   "/sw.js": "proxy/sw.js",
   "/scramjet/scramjet.js": "proxy/scramjet/scramjet.js",
   "/scramjet/scramjet.wasm": "proxy/scramjet/scramjet.wasm",

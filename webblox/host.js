@@ -13,6 +13,8 @@
 // it); without a place the page is a launcher. With a Scramjet 2 proxy,
 // roblox.com's Play button opens this page (integrations/scramjet/plugin.ts).
 
+import { DIRECT_WISP_URL, hasDirectSockets, installDirectWisp } from "./direct-wisp.js";
+
 const ROOT = new URL("./", import.meta.url);
 const ENGINE_ROOT = new URL("engine", ROOT).href;
 
@@ -20,6 +22,7 @@ const ENGINE_ROOT = new URL("engine", ROOT).href;
 // checked copy, so a returning player loads the engine without the network.
 // Falls back to the unversioned path when version.json is unreadable.
 async function engineBase() {
+  if (location.protocol === "isolated-app:") return ENGINE_ROOT;
   try {
     const response = await fetch(`${ENGINE_ROOT}/version.json`, { cache: "no-store" });
     const upload = response.ok ? (await response.json()).clientVersionUpload : null;
@@ -61,7 +64,8 @@ const say = (text) => {
 
 // Opened with ?wisp=<server> (the opener may be on another origin, so
 // localStorage cannot carry it), the page remembers that server for the joins
-// that follow. Otherwise it uses /wisp/ on this host, which server.ts serves.
+// that follow. In an IWA with Direct Sockets, use the built-in TCPSocket Wisp
+// bridge; otherwise fall back to /wisp/ on this host.
 
 function wispUrl() {
   const url = new URL(location.href);
@@ -71,6 +75,7 @@ function wispUrl() {
     url.searchParams.delete("wisp");
     history.replaceState(history.state, "", url);
   }
+  if (hasDirectSockets() && (!given || given === DIRECT_WISP_URL)) return DIRECT_WISP_URL;
   const stored = localStorage.getItem(WISP_KEY);
   if (stored && /^wss?:\/\//i.test(stored)) return stored;
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/wisp/`;
@@ -81,8 +86,9 @@ const WISP = wispUrl();
 const REQUEST_TIMEOUT_MS = 30_000;
 
 const transport = (async () => {
+  if (WISP === DIRECT_WISP_URL) installDirectWisp();
   const { default: EpoxyTransport } = await import(new URL("epoxy.mjs", ROOT).href);
-  const epoxy = new EpoxyTransport({ wisp: WISP });
+  const epoxy = new EpoxyTransport({ wisp: WISP, ...(WISP === DIRECT_WISP_URL ? { wisp_v2: false } : {}) });
   await epoxy.init();
   return epoxy;
 })();
@@ -365,9 +371,41 @@ navigator.serviceWorker.startMessages();
 
 // ---- Session ------------------------------------------------------------------
 
-async function sessionAccepted() {
+async function currentUser() {
   const result = await upstream({ url: SESSION_CHECK, method: "GET", headers: [], body: null });
-  return result.status === 200;
+  if (result.status !== 200) return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(result.body));
+  } catch {
+    return {};
+  }
+}
+
+async function sessionAccepted() {
+  return (await currentUser()) !== null;
+}
+
+async function robloxPostWithCsrf(url, payload) {
+  const encoded = payload === undefined ? null : new TextEncoder().encode(JSON.stringify(payload)).buffer;
+  const baseHeaders = [
+    ["accept", "application/json"],
+    ["content-type", "application/json"],
+  ];
+  let result = await upstream({ url, method: "POST", headers: baseHeaders, body: encoded ? encoded.slice(0) : null });
+  const csrf = result.headers.find(([k]) => k.toLowerCase() === "x-csrf-token")?.[1];
+  if (result.status === 403 && csrf) {
+    result = await upstream({
+      url,
+      method: "POST",
+      headers: [...baseHeaders, ["x-csrf-token", csrf]],
+      body: encoded ? encoded.slice(0) : null,
+    });
+  }
+  let json = null;
+  try {
+    json = JSON.parse(new TextDecoder().decode(result.body));
+  } catch {}
+  return { status: result.status, json };
 }
 
 // A Scramjet 2 browser on this origin (its controller) keeps its cookie jar in
@@ -421,54 +459,166 @@ async function trySession(value) {
 
 // Joining needs a signed-in account (gamejoin answers 524 "Not authorized"
 // otherwise), so this runs before the engine starts and only then.
-function askForSession(expired) {
+function askForSession(expired, { allowCancel = false } = {}) {
   return new Promise((resolve) => {
+    let pollTimer = 0;
+    let closed = false;
+    const stopPolling = () => {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = 0;
+    };
+
     const shade = document.createElement("div");
     shade.className = "session";
     shade.innerHTML = `
       <form novalidate aria-labelledby="session-title">
         <h1 id="session-title"></h1>
-        <p>Inicia sesión en Roblox con “Email a code” en la página anterior. Vuelve aquí y pulsa Reintentar para usar esa sesión automáticamente.</p>
+        <p>Usa <b>Inicio rápido</b> (aprueba el código en roblox.com/crossdevicelogin/ConfirmCode desde tu móvil o navegador) o pega tu cookie <code>.ROBLOSECURITY</code>.</p>
+        <div class="quick-code" hidden></div>
+        <p class="quick-status" hidden></p>
+        <div class="actions">
+          <button type="button" class="quick-btn">Generar código rápido</button>
+          <button type="button" class="secondary proxy-btn">Leer del proxy</button>
+        </div>
+        <div class="session-divider">o pega la cookie</div>
+        <input type="password" autocomplete="off" spellcheck="false" placeholder="_|WARNING:-DO-NOT-SHARE-THIS.--|..." aria-label="Cookie .ROBLOSECURITY" />
         <p class="error" id="session-error" role="alert"></p>
         <div class="actions">
-          <button type="button" class="secondary">Volver</button>
-          <button type="submit">Reintentar</button>
+          <button type="button" class="secondary cancel-btn"></button>
+          <button type="submit">Entrar con cookie</button>
         </div>
       </form>`;
+
     const form = shade.querySelector("form");
     const error = form.querySelector(".error");
-    const [back, submit] = form.querySelectorAll("button");
+    const quickCode = form.querySelector(".quick-code");
+    const quickStatus = form.querySelector(".quick-status");
+    const quickBtn = form.querySelector(".quick-btn");
+    const proxyBtn = form.querySelector(".proxy-btn");
+    const cancelBtn = form.querySelector(".cancel-btn");
+    const cookieInput = form.querySelector("input");
+    const submitBtn = form.querySelector('button[type="submit"]');
+
     form.querySelector("h1").textContent = expired ? "La sesión de Roblox caducó" : "Inicia sesión en Roblox";
+    cancelBtn.textContent = allowCancel ? "Cerrar" : "Volver";
+
     const fail = (text) => {
       error.textContent = text;
-      submit.focus();
     };
-    submit.addEventListener("click", () => { error.textContent = ""; });
-    back.addEventListener("click", () => location.assign(ROOT.href));
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const value = await proxySession();
-      if (!value) return fail("No se encontró una sesión de Roblox. Inicia sesión en la página anterior y vuelve a intentarlo.");
-      submit.disabled = true;
-      let accepted = false;
+    const finish = (ok = true) => {
+      closed = true;
+      stopPolling();
+      shade.remove();
+      resolve(ok);
+    };
+
+    cancelBtn.addEventListener("click", () => {
+      if (allowCancel) finish(false);
+      else location.assign(ROOT.href);
+    });
+
+    quickBtn.addEventListener("click", async () => {
+      stopPolling();
+      error.textContent = "";
+      quickBtn.disabled = true;
+      quickStatus.hidden = false;
+      quickStatus.textContent = "Generando código…";
       try {
-        accepted = await trySession(value);
+        const created = await robloxPostWithCsrf("https://apis.roblox.com/auth-token-service/v1/login/create");
+        if (created.status !== 200 || !created.json?.code || !created.json?.privateKey) {
+          throw new Error(`Roblox respondió HTTP ${created.status}`);
+        }
+        const { code, privateKey } = created.json;
+        quickCode.hidden = false;
+        quickCode.textContent = code;
+        quickStatus.textContent = "Introduce este código en roblox.com/crossdevicelogin/ConfirmCode y apruébalo…";
+
+        const poll = async () => {
+          if (closed) return;
+          try {
+            const st = await robloxPostWithCsrf("https://apis.roblox.com/auth-token-service/v1/login/status", { code, privateKey });
+            if (closed) return;
+            const statusValue = st.json?.status;
+            if (statusValue === "Validated") {
+              quickStatus.textContent = "Código aprobado. Iniciando sesión…";
+              const login = await robloxPostWithCsrf("https://auth.roblox.com/v2/login", {
+                ctype: "AuthToken",
+                cvalue: code,
+                password: privateKey,
+              });
+              if (login.status === 200 && (await sessionAccepted())) {
+                finish(true);
+                return;
+              }
+              throw new Error(`Error al canjear el código (HTTP ${login.status})`);
+            }
+            if (statusValue === "Cancelled" || st.status === 400) {
+              quickStatus.textContent = "Código cancelado o caducado. Genera uno nuevo.";
+              quickBtn.disabled = false;
+              return;
+            }
+            if (statusValue === "UserLinked") {
+              quickStatus.textContent = "Código introducido. Confírmalo en tu otro dispositivo…";
+            }
+          } catch (err) {
+            if (closed) return;
+            fail(err.message || String(err));
+            quickBtn.disabled = false;
+            return;
+          }
+          pollTimer = setTimeout(poll, 3000);
+        };
+        pollTimer = setTimeout(poll, 3000);
+      } catch (err) {
+        quickStatus.hidden = true;
+        quickBtn.disabled = false;
+        fail(`No se pudo iniciar Quick Login: ${err.message || err}`);
+      }
+    });
+
+    proxyBtn.addEventListener("click", async () => {
+      error.textContent = "";
+      const value = await proxySession();
+      if (!value) return fail("No se encontró una sesión en el proxy Scramjet.");
+      proxyBtn.disabled = true;
+      try {
+        if (await trySession(value)) {
+          finish(true);
+          return;
+        }
+        fail("La sesión del proxy caducó.");
       } catch (err) {
         forgetSession();
-        submit.disabled = false;
-        return fail(`No se pudo conectar con Roblox: ${err.message || err}`);
+        fail(`No se pudo conectar con Roblox: ${err.message || err}`);
       }
-      submit.disabled = false;
-      if (!accepted) return fail("La sesión del proxy caducó. Inicia sesión en Roblox otra vez.");
-      shade.remove();
-      resolve();
+      proxyBtn.disabled = false;
     });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      error.textContent = "";
+      const raw = cookieInput.value.trim().replace(/^\.ROBLOSECURITY=/i, "");
+      if (!raw) return fail("Pega tu cookie .ROBLOSECURITY o usa Quick Login.");
+      submitBtn.disabled = true;
+      try {
+        if (await trySession(raw)) {
+          finish(true);
+          return;
+        }
+        fail("Roblox rechazó esa cookie.");
+      } catch (err) {
+        forgetSession();
+        fail(`No se pudo conectar con Roblox: ${err.message || err}`);
+      }
+      submitBtn.disabled = false;
+    });
+
     document.body.append(shade);
-    submit.focus();
+    quickBtn.focus();
   });
 }
 
-// Signing in on roblox.com in the Scramjet browser is the only sign-in path.
+// Signing in via Quick Login, pasted cookie, or Scramjet browser storage.
 async function ensureSession() {
   const saved = savedSession();
   const proxied = await proxySession();
@@ -595,6 +745,10 @@ function showLauncher() {
   const launcher = document.createElement("main");
   launcher.className = "launcher";
   launcher.innerHTML = `
+    <div class="account-bar">
+      <span class="account-label">Comprobando sesión…</span>
+      <button type="button" class="account-btn" hidden></button>
+    </div>
     <form role="search">
       <input type="search" placeholder="Busca juegos o pega un enlace de juego" aria-label="Busca juegos o pega un enlace de juego" autocomplete="off" spellcheck="false">
       <button type="submit">Buscar</button>
@@ -622,6 +776,35 @@ function showLauncher() {
     <p class="cache-line" hidden><span class="cache-text"></span> <button type="button" class="cache-clear">Vaciar</button></p>
     <p class="launcher-status" role="status"></p>
     <ul class="launcher-games"></ul>`;
+  const accountLabel = launcher.querySelector(".account-label");
+  const accountBtn = launcher.querySelector(".account-btn");
+  const refreshAccount = async () => {
+    accountBtn.hidden = true;
+    if (!savedSession()) {
+      const proxied = await proxySession().catch(() => null);
+      if (proxied) storeSession(proxied);
+    }
+    const user = savedSession() ? await currentUser().catch(() => null) : null;
+    accountBtn.hidden = false;
+    if (user?.name) {
+      accountLabel.textContent = `Conectado como ${user.displayName ? `${user.displayName} (@${user.name})` : `@${user.name}`}${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
+      accountBtn.textContent = "Cerrar sesión";
+      accountBtn.classList.remove("primary");
+      accountBtn.onclick = () => {
+        forgetSession();
+        void refreshAccount();
+      };
+    } else {
+      accountLabel.textContent = `Sin sesión de Roblox${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
+      accountBtn.textContent = "Iniciar sesión";
+      accountBtn.classList.add("primary");
+      accountBtn.onclick = async () => {
+        await askForSession(false, { allowCancel: true });
+        void refreshAccount();
+      };
+    }
+  };
+  void refreshAccount();
   const form = launcher.querySelector("form");
   const hint = launcher.querySelector(".renderer-hint");
   const hints = {
@@ -1028,6 +1211,10 @@ async function setUpDownloader(launcher) {
   const text = launcher.querySelector(".downloader-text");
   const bar = launcher.querySelector(".downloader-bar");
   const button = launcher.querySelector(".downloader-button");
+  if (location.protocol === "isolated-app:") {
+    text.textContent = "Incluido en el paquete local (.swbn). Los juegos arrancan directo desde el disco.";
+    return;
+  }
   if (!navigator.serviceWorker?.controller || !("caches" in window)) {
     text.textContent = "Recarga la página para poder descargar el motor por adelantado.";
     return;

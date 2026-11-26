@@ -7,3 +7,6 @@ proxy/scramjet/
 proxy/controller/
 # Temp folder fetch-webblox.mjs unpacks the archived client into
 .webclient-archive-*/
+# Standalone .swbn Isolated Web App output & local signing key
+swbn/dist/
+swbn/iwa-key.pem

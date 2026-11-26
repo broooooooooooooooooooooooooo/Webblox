@@ -46,7 +46,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #18191c; c
 .session {
   position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10; display: grid; place-items: center; background: rgba(0, 0, 0, 0.6);
 }
-.session form { display: grid; gap: 12px; width: min(92vw, 420px); padding: 22px; border-radius: 12px; background: #232527; }
+.session form { display: grid; gap: 12px; width: min(92vw, 440px); padding: 22px; border-radius: 12px; background: #232527; }
 .session h1 { font-size: 19px; }
 .session p { color: #bbb; font-size: 14px; line-height: 1.45; }
 .session input {
@@ -54,9 +54,23 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #18191c; c
 }
 .session input[aria-invalid="true"] { border-color: #ff6b6b; }
 .session .error { min-height: 1.2em; color: #ff8a8a; }
-.session .actions { display: flex; gap: 8px; justify-content: flex-end; }
+.session .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .session button.secondary { background: #3a3c40; }
 .session button:disabled { opacity: 0.6; cursor: default; }
+.quick-code {
+  padding: 12px; border: 1px solid #3a3f4b; border-radius: 10px; background: #18191c;
+  text-align: center; font: 700 26px/1.2 ui-monospace, monospace; letter-spacing: 0.14em; color: #fff;
+}
+.session-divider { display: flex; align-items: center; gap: 8px; color: #888; font-size: 12px; text-transform: uppercase; }
+.session-divider::before, .session-divider::after { content: ""; flex: 1; height: 1px; background: #333; }
+.account-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 14px; padding: 10px 14px; border: 1px solid #333; border-radius: 10px; background: #1f2123; font-size: 14px;
+}
+.account-bar button {
+  padding: 6px 12px; border: 0; border-radius: 8px; background: #3a3c40; color: #fff; font: inherit; font-weight: 600; cursor: pointer;
+}
+.account-bar button.primary { background: #335fff; }
 
 /* No place to join yet: search Roblox or paste a game link. */
 #loading-overlay[hidden], body.launcher-open #canvas { display: none; }

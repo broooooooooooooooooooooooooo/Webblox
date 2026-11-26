@@ -116,6 +116,9 @@ async function loadOrCreatePrivateKey() {
   if (fromEnv) {
     return createPrivateKey(fromEnv);
   }
+  if (process.env.CI) {
+    throw new Error("Missing IWA_SIGNING_KEY environment secret in CI. Every release must be signed with the same .pem key.");
+  }
   try {
     const pem = await readFile(KEY_PATH, "utf8");
     return createPrivateKey(pem);

@@ -14,6 +14,7 @@
 // roblox.com's Play button opens this page (integrations/scramjet/plugin.ts).
 
 import { DIRECT_WISP_URL, hasDirectSockets, installDirectWisp } from "./direct-wisp.js";
+import { THEMES, startThemeBackground, stopThemeBackground } from "./themes.js";
 
 const ROOT = new URL("./", import.meta.url);
 const ENGINE_ROOT = new URL("engine", ROOT).href;
@@ -320,19 +321,25 @@ async function upstream(message, asDesktop = desktopGameJoin) {
   let data = await new Response(response.body).arrayBuffer();
 
   let jar = null;
+  let jarChanged = false;
   const kept = [];
   for (const [name, value] of response.headers) {
     const key = name.toLowerCase();
     if (key === "set-cookie") {
       const cookie = parseSetCookie(target, value);
-      if (cookie) jar = putCookie(jar ?? readJar(), cookie);
+      if (cookie) {
+        const baseJar = jar ?? readJar();
+        const prev = baseJar.find((c) => c.name === cookie.name && c.domain === cookie.domain && c.path === cookie.path);
+        if (!prev || prev.value !== cookie.value || prev.expires !== cookie.expires) jarChanged = true;
+        jar = putCookie(baseJar, cookie);
+      }
     } else if (key === "location") {
       kept.push([key, new URL(value, target).href]);
     } else if (!DROP_RESPONSE.has(key)) {
       kept.push([key, value]);
     }
   }
-  if (jar) writeJar(jar);
+  if (jar && jarChanged) writeJar(jar);
   if (gameJoin && response.status === 200) {
     const answer = joinAnswerOf(data);
     const joinScript = answer?.joinScript ?? null;
@@ -677,6 +684,9 @@ const RENDERER_KEY = "blox.renderer";
 // eases the GPU and its memory under WebGL and WebGPU alike.
 const SCALE_KEY = "blox.renderScale";
 const SCALES = ["1", "0.75", "0.5"];
+const THEME_KEY = "blox.theme";
+const SHOW_FPS_KEY = "blox.showFps";
+const PERF_MODE_KEY = "blox.perfMode";
 
 function savedScale() {
   try {
@@ -709,9 +719,47 @@ function saveRenderer(value) {
   } catch {}
 }
 
-function play(placeId) {
+function savedTheme() {
+  try {
+    const value = localStorage.getItem(THEME_KEY);
+    return THEMES.includes(value) ? value : "space";
+  } catch {
+    return "space";
+  }
+}
+
+function saveTheme(value) {
+  try {
+    localStorage.setItem(THEME_KEY, THEMES.includes(value) ? value : "space");
+  } catch {}
+}
+
+function savedBool(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    if (value === "1") return true;
+    if (value === "0") return false;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveBool(key, value) {
+  try {
+    localStorage.setItem(key, value ? "1" : "0");
+  } catch {}
+}
+
+const savedShowFps = () => savedBool(SHOW_FPS_KEY, false);
+const savedPerfMode = () => savedBool(PERF_MODE_KEY, true);
+
+function play(placeId, serverId = null) {
   const url = new URL(location.href);
   url.search = `?placeId=${placeId}`;
+  if (serverId && /^[A-Za-z0-9-]{1,64}$/.test(serverId)) {
+    url.searchParams.set("gameInstanceId", serverId);
+  }
   const renderer = savedRenderer();
   if (renderer) url.searchParams.set("renderer", renderer);
   const scale = savedScale();
@@ -739,45 +787,193 @@ function gameItem(game) {
   return item;
 }
 
+async function fetchFriends(userId) {
+  const friendsRes = await robloxJson(`https://friends.roblox.com/v1/users/${userId}/friends`);
+  const list = Array.isArray(friendsRes?.data) ? friendsRes.data : [];
+  if (!list.length) return [];
+
+  const presenceMap = new Map();
+  const avatarMap = new Map();
+  for (let i = 0; i < list.length; i += 50) {
+    const chunkIds = list.slice(i, i + 50).map((f) => f.id);
+    const [presRes, thumbRes] = await Promise.all([
+      robloxPostWithCsrf("https://presence.roblox.com/v1/presence/users", { userIds: chunkIds }).catch(() => ({ json: null })),
+      robloxJson(
+        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${chunkIds.join(",")}&size=150x150&format=Png&isCircular=true`,
+      ).catch(() => ({ data: [] })),
+    ]);
+    for (const p of presRes?.json?.userPresences ?? []) presenceMap.set(p.userId, p);
+    for (const t of thumbRes?.data ?? []) if (t.imageUrl) avatarMap.set(t.targetId, t.imageUrl);
+  }
+
+  const stateOrder = { 2: 0, 1: 1, 3: 2, 0: 3 };
+  return list
+    .map((f) => {
+      const p = presenceMap.get(f.id);
+      const type = p?.userPresenceType ?? 0;
+      const rawPlace = p?.placeId ?? p?.rootPlaceId ?? null;
+      const placeId = rawPlace && /^[1-9]\d{0,18}$/.test(String(rawPlace)) ? String(rawPlace) : null;
+      const gameId = typeof p?.gameId === "string" && /^[A-Za-z0-9-]{1,64}$/.test(p.gameId) ? p.gameId : null;
+      return {
+        id: f.id,
+        name: f.name,
+        displayName: f.displayName || f.name,
+        avatar: avatarMap.get(f.id) || "",
+        type,
+        location: p?.lastLocation || "",
+        placeId,
+        gameId,
+      };
+    })
+    .sort((a, b) => (stateOrder[a.type] ?? 9) - (stateOrder[b.type] ?? 9) || a.displayName.localeCompare(b.displayName));
+}
+
+function friendItem(friend) {
+  const item = document.createElement("li");
+  item.className = "friend-card";
+
+  const avatarWrap = document.createElement("div");
+  avatarWrap.className = "friend-avatar-wrap";
+  const img = document.createElement("img");
+  img.className = "friend-avatar";
+  img.alt = "";
+  img.loading = "lazy";
+  if (friend.avatar) img.src = friend.avatar;
+  const dot = document.createElement("span");
+  dot.className = "friend-dot";
+  const state = friend.type === 2 ? "ingame" : friend.type === 1 ? "online" : friend.type === 3 ? "studio" : "offline";
+  dot.dataset.state = state;
+  avatarWrap.append(img, dot);
+
+  const info = document.createElement("div");
+  info.className = "friend-info";
+  const name = document.createElement("div");
+  name.className = "friend-name";
+  name.textContent = friend.displayName !== friend.name ? `${friend.displayName} (@${friend.name})` : `@${friend.name}`;
+  const presence = document.createElement("div");
+  presence.className = "friend-presence";
+  presence.dataset.state = state;
+  if (friend.type === 2) {
+    presence.textContent = friend.location ? `Jugando: ${friend.location}` : friend.placeId ? "En un juego" : "En juego (unión privada)";
+  } else if (friend.type === 1) {
+    presence.textContent = "En línea";
+  } else if (friend.type === 3) {
+    presence.textContent = "En Roblox Studio";
+  } else {
+    presence.textContent = "Desconectado";
+  }
+  info.append(name, presence);
+  item.append(avatarWrap, info);
+
+  if (friend.type === 2 && friend.placeId) {
+    const joinBtn = document.createElement("button");
+    joinBtn.type = "button";
+    joinBtn.className = "friend-join";
+    joinBtn.textContent = "Unirse";
+    joinBtn.addEventListener("click", () => play(friend.placeId, friend.gameId));
+    item.append(joinBtn);
+  }
+  return item;
+}
+
 function showLauncher() {
   document.getElementById("loading-overlay").hidden = true;
   document.body.classList.add("launcher-open");
+  const themeCanvas = document.getElementById("theme-bg");
+  startThemeBackground(themeCanvas, savedTheme());
+
   const launcher = document.createElement("main");
   launcher.className = "launcher";
   launcher.innerHTML = `
-    <div class="account-bar">
-      <span class="account-label">Comprobando sesión…</span>
-      <button type="button" class="account-btn" hidden></button>
-    </div>
-    <form role="search">
-      <input type="search" placeholder="Busca juegos o pega un enlace de juego" aria-label="Busca juegos o pega un enlace de juego" autocomplete="off" spellcheck="false">
-      <button type="submit">Buscar</button>
-    </form>
-    <fieldset class="renderer-switch">
-      <legend>Gráficos</legend>
-      <label><input type="radio" name="renderer" value=""> Automático</label>
-      <label><input type="radio" name="renderer" value="webgpu"> WebGPU</label>
-      <label><input type="radio" name="renderer" value="webgl"> WebGL</label>
-    </fieldset>
-    <p class="renderer-hint"></p>
-    <fieldset class="renderer-switch quality-switch">
-      <legend>Calidad</legend>
-      <label><input type="radio" name="scale" value="1"> Alta</label>
-      <label><input type="radio" name="scale" value="0.75"> Media</label>
-      <label><input type="radio" name="scale" value="0.5"> Rendimiento</label>
-    </fieldset>
-    <p class="renderer-hint quality-hint"></p>
-    <section class="downloader" aria-labelledby="downloader-title">
+    <header class="glass-card topbar">
+      <div class="brand-row">
+        <span class="brand-badge">W</span>
+        <span class="brand-title">Webblox</span>
+      </div>
+      <div class="account-controls">
+        <span class="account-label">Comprobando sesión…</span>
+        <button type="button" class="account-btn" hidden></button>
+      </div>
+    </header>
+    <section class="glass-card search-card">
+      <form role="search">
+        <input type="search" placeholder="Busca juegos o pega un enlace / Place ID de Roblox" aria-label="Busca juegos o pega un enlace de juego" autocomplete="off" spellcheck="false">
+        <button type="submit">Buscar</button>
+      </form>
+      <p class="launcher-status" role="status"></p>
+      <ul class="launcher-games"></ul>
+    </section>
+    <section class="glass-card friends-card" hidden>
+      <div class="section-head">
+        <h2>Amigos</h2>
+        <button type="button" class="ghost-btn friends-refresh">Actualizar</button>
+      </div>
+      <p class="friends-status">Cargando amigos…</p>
+      <ul class="friends-list"></ul>
+    </section>
+    <section class="glass-card settings-grid">
+      <fieldset class="renderer-switch">
+        <legend>Tema</legend>
+        <label><input type="radio" name="theme" value="space"> Space</label>
+        <label><input type="radio" name="theme" value="aurora"> Aurora</label>
+        <label><input type="radio" name="theme" value="dark"> Oscuro</label>
+      </fieldset>
+      <fieldset class="renderer-switch">
+        <legend>Gráficos</legend>
+        <label><input type="radio" name="renderer" value=""> Automático</label>
+        <label><input type="radio" name="renderer" value="webgpu"> WebGPU</label>
+        <label><input type="radio" name="renderer" value="webgl"> WebGL</label>
+      </fieldset>
+      <p class="renderer-hint"></p>
+      <fieldset class="renderer-switch quality-switch">
+        <legend>Calidad</legend>
+        <label><input type="radio" name="scale" value="1"> Alta</label>
+        <label><input type="radio" name="scale" value="0.75"> Media</label>
+        <label><input type="radio" name="scale" value="0.5"> Rendimiento</label>
+      </fieldset>
+      <p class="renderer-hint quality-hint"></p>
+      <div class="toggle-row">
+        <label class="toggle-pill"><input type="checkbox" id="toggleFps"> Mostrar FPS en una esquina</label>
+        <label class="toggle-pill"><input type="checkbox" id="togglePerf"> Optimizar GPU y HiDPI (más FPS)</label>
+      </div>
+    </section>
+    <section class="glass-card downloader" aria-labelledby="downloader-title">
       <h2 id="downloader-title">Motor de Roblox</h2>
       <p class="downloader-text">Comprobando…</p>
       <progress class="downloader-bar" max="1" value="0" hidden></progress>
       <button type="button" class="downloader-button" hidden>Descargar</button>
-    </section>
-    <p class="cache-line" hidden><span class="cache-text"></span> <button type="button" class="cache-clear">Vaciar</button></p>
-    <p class="launcher-status" role="status"></p>
-    <ul class="launcher-games"></ul>`;
+      <p class="cache-line" hidden><span class="cache-text"></span> <button type="button" class="cache-clear">Vaciar</button></p>
+    </section>`;
+
   const accountLabel = launcher.querySelector(".account-label");
   const accountBtn = launcher.querySelector(".account-btn");
+  const friendsCard = launcher.querySelector(".friends-card");
+  const friendsStatus = launcher.querySelector(".friends-status");
+  const friendsList = launcher.querySelector(".friends-list");
+  const friendsRefresh = launcher.querySelector(".friends-refresh");
+  let activeUserId = null;
+
+  const loadFriends = async () => {
+    if (!activeUserId) return;
+    friendsCard.hidden = false;
+    friendsRefresh.disabled = true;
+    friendsStatus.textContent = "Actualizando amigos…";
+    try {
+      const friends = await fetchFriends(activeUserId);
+      const inGame = friends.filter((f) => f.type === 2).length;
+      const online = friends.filter((f) => f.type === 1 || f.type === 3).length;
+      friendsStatus.textContent = friends.length
+        ? `${friends.length} amigos · ${inGame} jugando · ${online} en línea`
+        : "No tienes amigos añadidos en esta cuenta.";
+      friendsList.replaceChildren(...friends.map(friendItem));
+    } catch (error) {
+      friendsStatus.textContent = `No se pudieron cargar los amigos: ${error.message || error}`;
+    } finally {
+      friendsRefresh.disabled = false;
+    }
+  };
+  friendsRefresh.addEventListener("click", () => void loadFriends());
+
   const refreshAccount = async () => {
     accountBtn.hidden = true;
     if (!savedSession()) {
@@ -787,15 +983,23 @@ function showLauncher() {
     const user = savedSession() ? await currentUser().catch(() => null) : null;
     accountBtn.hidden = false;
     if (user?.name) {
-      accountLabel.textContent = `Conectado como ${user.displayName ? `${user.displayName} (@${user.name})` : `@${user.name}`}${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
+      activeUserId = user.id ?? null;
+      accountLabel.textContent = `${user.displayName ? `${user.displayName} (@${user.name})` : `@${user.name}`}${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
       accountBtn.textContent = "Cerrar sesión";
       accountBtn.classList.remove("primary");
       accountBtn.onclick = () => {
         forgetSession();
+        activeUserId = null;
+        friendsCard.hidden = true;
+        friendsList.replaceChildren();
         void refreshAccount();
       };
+      if (activeUserId) void loadFriends();
     } else {
-      accountLabel.textContent = `Sin sesión de Roblox${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
+      activeUserId = null;
+      friendsCard.hidden = true;
+      friendsList.replaceChildren();
+      accountLabel.textContent = `Sin sesión${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
       accountBtn.textContent = "Iniciar sesión";
       accountBtn.classList.add("primary");
       accountBtn.onclick = async () => {
@@ -805,6 +1009,16 @@ function showLauncher() {
     }
   };
   void refreshAccount();
+
+  const currentTheme = savedTheme();
+  for (const radio of launcher.querySelectorAll('input[name="theme"]')) {
+    radio.checked = radio.value === currentTheme;
+    radio.addEventListener("change", () => {
+      saveTheme(radio.value);
+      startThemeBackground(themeCanvas, radio.value);
+    });
+  }
+
   const form = launcher.querySelector("form");
   const hint = launcher.querySelector(".renderer-hint");
   const hints = {
@@ -823,9 +1037,9 @@ function showLauncher() {
   hint.textContent = hints[current];
   const qualityHint = launcher.querySelector(".quality-hint");
   const qualityHints = {
-    "1": "Resolución completa de tu pantalla.",
-    "0.75": "Dibuja algo más de la mitad de los píxeles: va más fluido y usa menos memoria de vídeo.",
-    "0.5": "Dibuja una cuarta parte de los píxeles: lo más fluido, con imagen algo borrosa.",
+    "1": "Resolución completa.",
+    "0.75": "Dibuja ~56 % de los píxeles: más FPS y menos consumo de memoria gráfica.",
+    "0.5": "Dibuja 25 % de los píxeles: máximo rendimiento.",
   };
   const scale = savedScale();
   for (const radio of launcher.querySelectorAll('input[name="scale"]')) {
@@ -836,6 +1050,15 @@ function showLauncher() {
     });
   }
   qualityHint.textContent = qualityHints[scale];
+
+  const fpsToggle = launcher.querySelector("#toggleFps");
+  fpsToggle.checked = savedShowFps();
+  fpsToggle.addEventListener("change", () => saveBool(SHOW_FPS_KEY, fpsToggle.checked));
+
+  const perfToggle = launcher.querySelector("#togglePerf");
+  perfToggle.checked = savedPerfMode();
+  perfToggle.addEventListener("change", () => saveBool(PERF_MODE_KEY, perfToggle.checked));
+
   void showCacheLine(launcher);
   if (!COMPAT.ok) {
     const note = document.createElement("p");
@@ -851,7 +1074,7 @@ function showLauncher() {
   launcher.addEventListener("change", markChecked);
   markChecked();
   void setUpDownloader(launcher);
-  const input = launcher.querySelector("input");
+  const input = launcher.querySelector(".search-card input");
   const status = launcher.querySelector(".launcher-status");
   const list = launcher.querySelector(".launcher-games");
   let search = 0;
@@ -1300,6 +1523,62 @@ function showUnsupported() {
   say(COMPAT.message);
 }
 
+function applyPerformanceOptimizations() {
+  if (!savedPerfMode()) return;
+
+  if (window.devicePixelRatio > 1) {
+    try {
+      Object.defineProperty(window, "devicePixelRatio", { get: () => 1, configurable: true });
+    } catch {}
+  }
+
+  const origGetContext = HTMLCanvasElement.prototype.getContext;
+  if (!origGetContext.__bloxPerf) {
+    const wrapped = function (type, attrs) {
+      if (type === "webgl2" || type === "webgl") {
+        const merged = { powerPreference: "high-performance", desynchronized: true, ...(attrs || {}) };
+        return origGetContext.call(this, type, merged);
+      }
+      return origGetContext.call(this, type, attrs);
+    };
+    wrapped.__bloxPerf = true;
+    HTMLCanvasElement.prototype.getContext = wrapped;
+  }
+
+  if (navigator.gpu?.requestAdapter && !navigator.gpu.requestAdapter.__bloxPerf) {
+    const origRequestAdapter = navigator.gpu.requestAdapter.bind(navigator.gpu);
+    const wrappedAdapter = (options) =>
+      origRequestAdapter({ powerPreference: "high-performance", ...(options || {}) });
+    wrappedAdapter.__bloxPerf = true;
+    try {
+      navigator.gpu.requestAdapter = wrappedAdapter;
+    } catch {}
+  }
+}
+
+function startFpsHud() {
+  const hud = document.getElementById("fps-hud");
+  if (!hud || !savedShowFps()) return;
+  hud.hidden = false;
+  hud.textContent = "-- FPS";
+  let frames = 0;
+  let lastReport = performance.now();
+  const tick = (now) => {
+    frames++;
+    const elapsed = now - lastReport;
+    if (elapsed >= 450) {
+      const fps = Math.round((frames * 1000) / elapsed);
+      const ms = (elapsed / frames).toFixed(1);
+      hud.textContent = `${fps} FPS · ${ms} ms`;
+      hud.dataset.tier = fps >= 50 ? "high" : fps >= 30 ? "mid" : "low";
+      frames = 0;
+      lastReport = now;
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
 async function boot() {
   const placeId = new URLSearchParams(location.search).get("placeId");
   const joining = Boolean(placeId && /^[1-9]\d{0,18}$/.test(placeId));
@@ -1313,6 +1592,9 @@ async function boot() {
   // The engine only joins experiences: without a place it logs "no startup
   // place id" and exits, so pick one here first.
   if (!joining) return showLauncher();
+  stopThemeBackground(document.getElementById("theme-bg"));
+  applyPerformanceOptimizations();
+  startFpsHud();
   say("Comprobando tu sesión de Roblox…");
   await ensureSession();
   keepEngineCache();

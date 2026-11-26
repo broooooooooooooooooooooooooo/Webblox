@@ -29,7 +29,8 @@ const CLOSE_REASON = {
   HOST_BLOCKED: 0x48,
 };
 
-const SEND_BUFFER_SIZE = 128;
+const SEND_BUFFER_SIZE = 512;
+const CONTINUE_STEP = 128;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -155,7 +156,7 @@ class DirectWispWebSocket extends EventTarget {
       this._openStream(streamId, payload);
     } else if (type === PACKET.DATA) {
       const stream = this._streams.get(streamId);
-      if (stream) stream.write(payload.slice());
+      if (stream) stream.enqueue(payload.slice());
     } else if (type === PACKET.CLOSE) {
       this._closeStream(streamId, null, false);
     }
@@ -186,27 +187,38 @@ class DirectWispWebSocket extends EventTarget {
       writer: null,
       reader: null,
       closed: false,
+      draining: false,
+      queue: [],
       packetsWritten: 0,
-      writeChain: Promise.resolve(),
-      write: (chunk) => {
+      enqueue: (chunk) => {
         if (state.closed) return;
-        state.writeChain = state.writeChain.then(async () => {
-          if (state.closed || !state.writer) return;
-          try {
-            await state.writer.write(chunk);
-            state.packetsWritten++;
-            if (state.packetsWritten % (SEND_BUFFER_SIZE / 2) === 0) {
-              this._emitPacket(u32Packet(PACKET.CONTINUE, streamId, SEND_BUFFER_SIZE));
+        state.queue.push(chunk);
+        if (state.writer && !state.draining) void state.drain();
+      },
+      drain: async () => {
+        if (state.draining || state.closed || !state.writer) return;
+        state.draining = true;
+        try {
+          while (!state.closed && state.queue.length > 0) {
+            const batch = state.queue.splice(0, state.queue.length);
+            for (let i = 0; i < batch.length; i++) {
+              await state.writer.write(batch[i]);
+              state.packetsWritten++;
+              if (state.packetsWritten % CONTINUE_STEP === 0) {
+                this._emitPacket(u32Packet(PACKET.CONTINUE, streamId, SEND_BUFFER_SIZE));
+              }
             }
-          } catch {
-            this._closeStream(streamId, CLOSE_REASON.NETWORK_ERROR, true);
           }
-        });
+        } catch {
+          this._closeStream(streamId, CLOSE_REASON.NETWORK_ERROR, true);
+        } finally {
+          state.draining = false;
+        }
       },
     };
     this._streams.set(streamId, state);
 
-    state.writeChain = tcp.opened
+    tcp.opened
       .then(({ readable, writable }) => {
         if (state.closed) {
           tcp.close().catch(() => {});
@@ -214,6 +226,7 @@ class DirectWispWebSocket extends EventTarget {
         }
         state.writer = writable.getWriter();
         state.reader = readable.getReader();
+        if (state.queue.length > 0) void state.drain();
         void this._pumpReads(streamId, state);
       })
       .catch(() => {

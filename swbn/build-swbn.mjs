@@ -141,10 +141,11 @@ function responseHeaders(contentType) {
   };
 }
 
-const ENGINE_WORKER_SHIM = Buffer.from(
-  'try{if(typeof self!=="undefined"&&self.trustedTypes&&!self.trustedTypes.defaultPolicy){self.trustedTypes.createPolicy("default",{createHTML:function(s){return s},createScript:function(s){return s},createScriptURL:function(s){return s}})}}catch(e){};',
-  "utf8",
-);
+const WORKER_SHIM_CODE = [
+  'try{if(typeof self!=="undefined"&&self.trustedTypes&&!self.trustedTypes.defaultPolicy){self.trustedTypes.createPolicy("default",{createHTML:function(s){return s},createScript:function(s){return s},createScriptURL:function(s){return s}})}}catch(e){}',
+  'try{if(typeof window==="undefined"&&typeof BroadcastChannel==="function"&&!self.__bloxWorkerFps){self.__bloxWorkerFps=1;var ch=new BroadcastChannel("blox-fps"),cnt=0,drew=false,last=performance.now(),flush=function(){var now=performance.now();if(now-last>=400&&cnt>0){ch.postMessage({n:cnt});cnt=0;last=now;}};var gp=self.GPUCanvasContext&&self.GPUCanvasContext.prototype;if(gp&&gp.getCurrentTexture&&!gp.getCurrentTexture.__bloxFps){var og=gp.getCurrentTexture;gp.getCurrentTexture=function(){cnt++;flush();return og.apply(this,arguments);};gp.getCurrentTexture.__bloxFps=1;}var gl=self.WebGL2RenderingContext&&self.WebGL2RenderingContext.prototype;if(gl){["drawElements","drawArrays","drawElementsInstanced","drawArraysInstanced","clear"].forEach(function(m){var om=gl[m];if(typeof om==="function"&&!om.__bloxFps){gl[m]=function(){drew=true;return om.apply(this,arguments);};gl[m].__bloxFps=1;}});}if(typeof self.requestAnimationFrame==="function"){var tick=function(){if(drew){cnt++;drew=false;}flush();self.requestAnimationFrame(tick);};self.requestAnimationFrame(tick);}}}catch(e){}',
+].join(";") + ";";
+const ENGINE_WORKER_SHIM = Buffer.from(WORKER_SHIM_CODE, "utf8");
 const SHIM_ENGINE_SCRIPTS = new Set(["WasmPlayer.js", "WebClient.js", "audio-processor-fast.js"]);
 
 async function addDirectory(builder, origin, urlPrefix, dir, { skipCompressed = true } = {}) {

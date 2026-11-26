@@ -687,6 +687,74 @@ const SCALES = ["1", "0.75", "0.5"];
 const THEME_KEY = "blox.theme";
 const SHOW_FPS_KEY = "blox.showFps";
 const PERF_MODE_KEY = "blox.perfMode";
+const RECENT_KEY = "blox.recentPlaces";
+
+function readRecentPlaces() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => (typeof item === "string" ? { placeId: item, last: 0 } : item))
+      .filter((item) => item && /^[1-9]\d{0,18}$/.test(String(item.placeId)));
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentPlace(placeId) {
+  if (!/^[1-9]\d{0,18}$/.test(String(placeId))) return;
+  const id = String(placeId);
+  const next = [{ placeId: id, last: Date.now() }, ...readRecentPlaces().filter((p) => p.placeId !== id)].slice(0, 12);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+function clearRecentPlaces() {
+  try {
+    localStorage.removeItem(RECENT_KEY);
+  } catch {}
+}
+
+async function fetchRecentGames() {
+  let recent = readRecentPlaces();
+  if (!recent.length) {
+    const stats = await askWorker({ type: "blox-cache-stats" }).catch(() => null);
+    if (stats?.top?.length) {
+      recent = stats.top.map((v) => ({ placeId: String(v.placeId), last: v.last || 0 }));
+      try {
+        localStorage.setItem(RECENT_KEY, JSON.stringify(recent));
+      } catch {}
+    }
+  }
+  const ids = recent.map((r) => r.placeId).slice(0, 12);
+  if (!ids.length) return [];
+
+  const details = await robloxJson(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${ids.join(",")}`);
+  const detailMap = new Map((Array.isArray(details) ? details : []).map((d) => [String(d.placeId), d]));
+  const universeIds = [...new Set([...detailMap.values()].map((d) => d.universeId).filter(Boolean))];
+  if (!universeIds.length) return [];
+
+  const [iconsRes, gamesRes] = await Promise.all([
+    robloxJson(
+      `https://thumbnails.roblox.com/v1/games/icons?universeIds=${universeIds.join(",")}&size=150x150&format=Webp&isCircular=false`,
+    ).catch(() => ({ data: [] })),
+    robloxJson(`https://games.roblox.com/v1/games?universeIds=${universeIds.join(",")}`).catch(() => ({ data: [] })),
+  ]);
+  const iconOf = new Map((iconsRes?.data ?? []).map((i) => [i.targetId, i.imageUrl]));
+  const playersOf = new Map((gamesRes?.data ?? []).map((g) => [g.id, g.playing]));
+
+  return ids
+    .map((id) => detailMap.get(id))
+    .filter(Boolean)
+    .map((d) => ({
+      placeId: String(d.placeId),
+      name: d.name,
+      creator: d.builder,
+      players: playersOf.get(d.universeId),
+      icon: iconOf.get(d.universeId),
+    }));
+}
 
 function savedScale() {
   try {
@@ -755,6 +823,7 @@ const savedShowFps = () => savedBool(SHOW_FPS_KEY, false);
 const savedPerfMode = () => savedBool(PERF_MODE_KEY, true);
 
 function play(placeId, serverId = null) {
+  saveRecentPlace(placeId);
   const url = new URL(location.href);
   url.search = `?placeId=${placeId}`;
   if (serverId && /^[A-Za-z0-9-]{1,64}$/.test(serverId)) {
@@ -903,6 +972,14 @@ function showLauncher() {
       <p class="launcher-status" role="status"></p>
       <ul class="launcher-games"></ul>
     </section>
+    <section class="glass-card recent-card" hidden>
+      <div class="section-head">
+        <h2>Juegos recientes</h2>
+        <button type="button" class="ghost-btn recent-clear">Limpiar</button>
+      </div>
+      <p class="friends-status recent-status"></p>
+      <ul class="launcher-games recent-games"></ul>
+    </section>
     <section class="glass-card friends-card" hidden>
       <div class="section-head">
         <h2>Amigos</h2>
@@ -947,11 +1024,42 @@ function showLauncher() {
 
   const accountLabel = launcher.querySelector(".account-label");
   const accountBtn = launcher.querySelector(".account-btn");
+  const recentCard = launcher.querySelector(".recent-card");
+  const recentStatus = launcher.querySelector(".recent-status");
+  const recentList = launcher.querySelector(".recent-games");
+  const recentClear = launcher.querySelector(".recent-clear");
   const friendsCard = launcher.querySelector(".friends-card");
   const friendsStatus = launcher.querySelector(".friends-status");
   const friendsList = launcher.querySelector(".friends-list");
   const friendsRefresh = launcher.querySelector(".friends-refresh");
   let activeUserId = null;
+
+  const loadRecent = async () => {
+    const localIds = readRecentPlaces();
+    if (!localIds.length && !activeUserId) {
+      recentCard.hidden = true;
+      return;
+    }
+    recentCard.hidden = false;
+    recentStatus.textContent = "Cargando recientes…";
+    try {
+      const games = await fetchRecentGames();
+      if (!games.length) {
+        recentCard.hidden = true;
+        return;
+      }
+      recentStatus.textContent = "";
+      recentList.replaceChildren(...games.map(gameItem));
+    } catch {
+      recentCard.hidden = true;
+    }
+  };
+
+  recentClear.addEventListener("click", () => {
+    clearRecentPlaces();
+    recentList.replaceChildren();
+    recentCard.hidden = true;
+  });
 
   const loadFriends = async () => {
     if (!activeUserId) return;
@@ -1007,6 +1115,7 @@ function showLauncher() {
         void refreshAccount();
       };
     }
+    void loadRecent();
   };
   void refreshAccount();
 
@@ -1311,6 +1420,7 @@ function askWorker(message) {
 }
 
 function recordVisit(placeId) {
+  saveRecentPlace(placeId);
   navigator.serviceWorker?.controller?.postMessage({ type: "blox-visit", placeId });
 }
 
@@ -1598,18 +1708,81 @@ function startFpsHud() {
   const hud = document.getElementById("fps-hud");
   if (!hud || !savedShowFps()) return;
   hud.hidden = false;
-  hud.textContent = "-- FPS";
-  let frames = 0;
+  hud.textContent = "Cargando…";
+
+  let gpuFrames = 0;
+  let offscreenFrames = 0;
+  let glDrew = false;
+  let sawEngineRender = false;
+
+  // 1. WebGPU swapchain frames (1 getCurrentTexture() per presented frame)
+  const gpuProto = globalThis.GPUCanvasContext?.prototype;
+  if (gpuProto?.getCurrentTexture && !gpuProto.getCurrentTexture.__bloxFps) {
+    const origGetTex = gpuProto.getCurrentTexture;
+    const wrappedGetTex = function (...args) {
+      sawEngineRender = true;
+      gpuFrames++;
+      return origGetTex.apply(this, args);
+    };
+    wrappedGetTex.__bloxFps = true;
+    try {
+      gpuProto.getCurrentTexture = wrappedGetTex;
+    } catch {}
+  }
+
+  // 2. WebGL / WebGL2 frames (mark frame dirty on real draw/clear calls)
+  for (const Ctx of [globalThis.WebGL2RenderingContext, globalThis.WebGLRenderingContext]) {
+    const proto = Ctx?.prototype;
+    if (!proto) continue;
+    for (const method of ["drawElements", "drawArrays", "drawElementsInstanced", "drawArraysInstanced", "clear"]) {
+      const orig = proto[method];
+      if (typeof orig !== "function" || orig.__bloxFps) continue;
+      const wrapped = function (...args) {
+        sawEngineRender = true;
+        glDrew = true;
+        return orig.apply(this, args);
+      };
+      wrapped.__bloxFps = true;
+      try {
+        proto[method] = wrapped;
+      } catch {}
+    }
+  }
+
+  // 3. OffscreenCanvas worker frames (if engine renders inside a Worker)
+  let fpsChannel = null;
+  if (typeof BroadcastChannel === "function") {
+    try {
+      fpsChannel = new BroadcastChannel("blox-fps");
+      fpsChannel.onmessage = (event) => {
+        if (event.data?.n > 0) {
+          sawEngineRender = true;
+          offscreenFrames += event.data.n;
+        }
+      };
+    } catch {}
+  }
+
   let lastReport = performance.now();
   const tick = (now) => {
-    frames++;
+    if (glDrew) {
+      gpuFrames++;
+      glDrew = false;
+    }
     const elapsed = now - lastReport;
-    if (elapsed >= 450) {
-      const fps = Math.round((frames * 1000) / elapsed);
-      const ms = (elapsed / frames).toFixed(1);
-      hud.textContent = `${fps} FPS · ${ms} ms`;
-      hud.dataset.tier = fps >= 50 ? "high" : fps >= 30 ? "mid" : "low";
-      frames = 0;
+    if (elapsed >= 500) {
+      const total = gpuFrames + offscreenFrames;
+      if (!sawEngineRender) {
+        hud.textContent = "Cargando…";
+        delete hud.dataset.tier;
+      } else {
+        const fps = Math.round((total * 1000) / elapsed);
+        const ms = total > 0 ? (elapsed / total).toFixed(1) : "—";
+        hud.textContent = `${fps} FPS · ${ms} ms`;
+        hud.dataset.tier = fps >= 50 ? "high" : fps >= 30 ? "mid" : "low";
+      }
+      gpuFrames = 0;
+      offscreenFrames = 0;
       lastReport = now;
     }
     requestAnimationFrame(tick);

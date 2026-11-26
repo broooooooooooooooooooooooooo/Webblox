@@ -1523,7 +1523,21 @@ function showUnsupported() {
   say(COMPAT.message);
 }
 
+function keepScreenAwake() {
+  if (!navigator.wakeLock?.request) return;
+  let lock = null;
+  const acquire = () => {
+    if (document.visibilityState !== "visible") return;
+    navigator.wakeLock.request("screen").then((s) => { lock = s; }).catch(() => {});
+  };
+  acquire();
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && (!lock || lock.released)) acquire();
+  });
+}
+
 function applyPerformanceOptimizations() {
+  keepScreenAwake();
   if (!savedPerfMode()) return;
 
   if (window.devicePixelRatio > 1) {
@@ -1536,7 +1550,18 @@ function applyPerformanceOptimizations() {
   if (!origGetContext.__bloxPerf) {
     const wrapped = function (type, attrs) {
       if (type === "webgl2" || type === "webgl") {
-        const merged = { powerPreference: "high-performance", desynchronized: true, ...(attrs || {}) };
+        // alpha: false + desynchronized enables Direct Scanout / zero-copy swapchain;
+        // antialias: false avoids costly MSAA resolve on integrated GPUs.
+        const merged = {
+          alpha: false,
+          antialias: false,
+          preserveDrawingBuffer: false,
+          powerPreference: "high-performance",
+          desynchronized: true,
+          ...(attrs || {}),
+        };
+        if (attrs?.alpha === undefined) merged.alpha = false;
+        if (attrs?.antialias === undefined) merged.antialias = false;
         return origGetContext.call(this, type, merged);
       }
       return origGetContext.call(this, type, attrs);
@@ -1552,6 +1577,19 @@ function applyPerformanceOptimizations() {
     wrappedAdapter.__bloxPerf = true;
     try {
       navigator.gpu.requestAdapter = wrappedAdapter;
+    } catch {}
+  }
+
+  // Promote WebGPU canvas to hardware Direct Scanout overlay by avoiding alpha compositing.
+  const gpuCtxProto = globalThis.GPUCanvasContext?.prototype;
+  if (gpuCtxProto?.configure && !gpuCtxProto.configure.__bloxPerf) {
+    const origConfigure = gpuCtxProto.configure;
+    const wrappedConfigure = function (config) {
+      return origConfigure.call(this, { ...config, alphaMode: "opaque" });
+    };
+    wrappedConfigure.__bloxPerf = true;
+    try {
+      gpuCtxProto.configure = wrappedConfigure;
     } catch {}
   }
 }

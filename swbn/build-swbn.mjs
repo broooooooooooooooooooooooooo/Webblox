@@ -234,6 +234,7 @@ async function main() {
     permissions_policy: {
       "cross-origin-isolated": ["self"],
       "direct-sockets": ["self"],
+      "screen-wake-lock": ["self"],
       fullscreen: ["self"],
       gamepad: ["self"],
       "clipboard-read": ["self"],

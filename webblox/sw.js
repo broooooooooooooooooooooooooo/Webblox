@@ -227,32 +227,47 @@ function reply(status, statusText, headers, body) {
 
 // A page of ours in this scope. Requests from the engine's workers carry the
 // worker's client id, so fall back to any window.
+let cachedRelayPage = null;
 async function relayPage(clientId) {
+  if (cachedRelayPage) return cachedRelayPage;
   const own = clientId ? await self.clients.get(clientId) : null;
-  if (own?.type === "window") return own;
+  if (own?.type === "window") {
+    cachedRelayPage = own;
+    return own;
+  }
   const pages = await self.clients.matchAll({ type: "window" });
   const page = pages.find((client) => client.frameType === "top-level") ?? pages[0];
   if (!page) throw new Error("no page to relay through");
+  cachedRelayPage = page;
   return page;
 }
 
 async function relay(clientId, message) {
-  const page = await relayPage(clientId);
-  return new Promise((resolve, reject) => {
-    const channel = new MessageChannel();
-    const timer = setTimeout(() => {
-      channel.port1.close();
-      reject(new Error("relay timed out"));
-    }, RELAY_TIMEOUT_MS);
-    channel.port1.onmessage = ({ data }) => {
-      clearTimeout(timer);
-      channel.port1.close();
-      if (data.ok) resolve(data);
-      else reject(new Error(data.error));
-    };
-    const transfer = message.body ? [channel.port2, message.body] : [channel.port2];
-    page.postMessage({ type: "blox-fetch", ...message }, transfer);
-  });
+  let page = await relayPage(clientId);
+  const send = (target) =>
+    new Promise((resolve, reject) => {
+      const channel = new MessageChannel();
+      const timer = setTimeout(() => {
+        channel.port1.close();
+        reject(new Error("relay timed out"));
+      }, RELAY_TIMEOUT_MS);
+      channel.port1.onmessage = ({ data }) => {
+        clearTimeout(timer);
+        channel.port1.close();
+        if (data.ok) resolve(data);
+        else reject(new Error(data.error));
+      };
+      const transfer = message.body ? [channel.port2, message.body] : [channel.port2];
+      target.postMessage({ type: "blox-fetch", ...message }, transfer);
+    });
+  try {
+    return await send(page);
+  } catch (error) {
+    cachedRelayPage = null;
+    if (error?.message === "relay timed out") throw error;
+    page = await relayPage(clientId);
+    return send(page);
+  }
 }
 
 // ---- Game asset cache -----------------------------------------------------------
@@ -324,18 +339,19 @@ function touch(url) {
   }, 5000);
 }
 
+let assetCachePromise = null;
+function getAssetCache() {
+  return (assetCachePromise ??= caches.open(ASSET_CACHE));
+}
+
 async function cachedGameAsset(url) {
   try {
-    const [cache, entry] = await Promise.all([caches.open(ASSET_CACHE), store("assets").then((s) => idb(s.get(url)))]);
-    if (!entry) return null;
+    const cache = await getAssetCache();
     const hit = await cache.match(url);
-    if (hit && (await hit.clone().blob()).size === entry.size) {
+    if (hit?.ok) {
       touch(url);
       return hit;
     }
-    // Damaged or missing: forget it, so it is downloaded and stored again.
-    await cache.delete(url);
-    (await store("assets", "readwrite")).delete(url);
   } catch {}
   return null;
 }
@@ -356,7 +372,7 @@ async function storeGameAsset(url, response, clientId) {
     const size = (await response.clone().blob()).size;
     if (!size || size > ASSET_BUDGET / 8) return;
     const place = await placeOf(clientId);
-    await (await caches.open(ASSET_CACHE)).put(url, response);
+    await (await getAssetCache()).put(url, response);
     const assets = await store("assets", "readwrite");
     const previous = await idb(assets.get(url));
     const places = [...new Set([...(previous?.places ?? []), ...(place ? [place] : [])])].slice(-8);

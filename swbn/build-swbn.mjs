@@ -138,6 +138,12 @@ function responseHeaders(contentType) {
   };
 }
 
+const ENGINE_WORKER_SHIM = Buffer.from(
+  'try{if(typeof self!=="undefined"&&self.trustedTypes&&!self.trustedTypes.defaultPolicy){self.trustedTypes.createPolicy("default",{createHTML:function(s){return s},createScript:function(s){return s},createScriptURL:function(s){return s}})}}catch(e){};',
+  "utf8",
+);
+const SHIM_ENGINE_SCRIPTS = new Set(["WasmPlayer.js", "WebClient.js", "audio-processor-fast.js"]);
+
 async function addDirectory(builder, origin, urlPrefix, dir, { skipCompressed = true } = {}) {
   const entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
   for (const entry of entries) {
@@ -149,7 +155,10 @@ async function addDirectory(builder, origin, urlPrefix, dir, { skipCompressed = 
     if (!entry.isFile()) continue;
     if (skipCompressed && (entry.name.endsWith(".br") || entry.name.endsWith(".gz"))) continue;
 
-    const bytes = await readFile(fullPath);
+    let bytes = await readFile(fullPath);
+    if (urlPrefix === "/blox/engine/" && SHIM_ENGINE_SCRIPTS.has(entry.name)) {
+      bytes = Buffer.concat([ENGINE_WORKER_SHIM, bytes]);
+    }
     const headers = responseHeaders(mimeFor(fullPath));
     if (entry.name === "index.html") {
       builder.addExchange(`${origin}${urlPrefix}`, 200, headers, bytes);

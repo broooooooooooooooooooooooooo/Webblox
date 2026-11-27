@@ -172,6 +172,11 @@ html, body {
 .session-pane[hidden] { display: none; }
 .twofa-box { display: grid; gap: 8px; padding-top: 4px; }
 .twofa-box[hidden] { display: none; }
+.captcha-box {
+  display: grid; gap: 8px; padding: 12px; border: 1px solid var(--glass-border);
+  border-radius: 12px; background: rgba(255, 255, 255, 0.05);
+}
+.captcha-box[hidden] { display: none; }
 .session-divider::before, .session-divider::after { content: ""; flex: 1; height: 1px; background: var(--glass-border); }
 
 /* Modern Roblox Launcher */

@@ -495,6 +495,10 @@ function askForSession(expired, { allowCancel = false } = {}) {
             <p class="twofa-hint">Introduce el código de verificación en 2 pasos (2FA):</p>
             <input type="text" class="twofa-input" inputmode="numeric" autocomplete="one-time-code" placeholder="Código de 6 dígitos" aria-label="Código 2FA" />
           </div>
+          <div class="captcha-box" hidden>
+            <p class="captcha-hint">Roblox requiere verificación CAPTCHA. Ábrelo en la ventana de Roblox, complétalo e inicia sesión allí; Webblox detectará tu sesión automáticamente.</p>
+            <button type="button" class="captcha-btn">Completar CAPTCHA en Roblox</button>
+          </div>
           <div class="actions">
             <button type="button" class="secondary cancel-btn"></button>
             <button type="submit" class="pass-submit">Iniciar sesión</button>
@@ -533,6 +537,9 @@ function askForSession(expired, { allowCancel = false } = {}) {
     const twofaBox = form.querySelector(".twofa-box");
     const twofaHint = form.querySelector(".twofa-hint");
     const twofaInput = form.querySelector(".twofa-input");
+    const captchaBox = form.querySelector(".captcha-box");
+    const captchaHint = form.querySelector(".captcha-hint");
+    const captchaBtn = form.querySelector(".captcha-btn");
     const passSubmit = form.querySelector(".pass-submit");
     const quickCode = form.querySelector(".quick-code");
     const quickStatus = form.querySelector(".quick-status");
@@ -545,15 +552,57 @@ function askForSession(expired, { allowCancel = false } = {}) {
     form.querySelector("h1").textContent = expired ? "La sesión de Roblox caducó" : "Inicia sesión en Roblox";
     for (const btn of cancelBtns) btn.textContent = allowCancel ? "Cerrar" : "Volver";
 
+    let captchaPoll = 0;
+    let captchaPopup = null;
+    const stopCaptchaPoll = () => {
+      if (captchaPoll) clearInterval(captchaPoll);
+      captchaPoll = 0;
+    };
+
     const fail = (text) => {
       error.textContent = text;
     };
     const finish = (ok = true) => {
       closed = true;
       stopPolling();
+      stopCaptchaPoll();
+      try { captchaPopup?.close(); } catch {}
       shade.remove();
       resolve(ok);
     };
+
+    captchaBtn.addEventListener("click", () => {
+      error.textContent = "";
+      stopCaptchaPoll();
+      const w = Math.min(620, Math.round(screen.availWidth * 0.9));
+      const h = Math.min(760, Math.round(screen.availHeight * 0.9));
+      const left = Math.round((screen.availWidth - w) / 2);
+      const top = Math.round((screen.availHeight - h) / 2);
+      captchaPopup = window.open(
+        new URL("/", ROOT).href,
+        "blox-captcha-login",
+        `popup=yes,width=${w},height=${h},left=${left},top=${top}`,
+      );
+      if (!captchaPopup) {
+        return fail("El navegador bloqueó la ventana emergente. Permite popups o abre '/' manualmente.");
+      }
+      captchaHint.textContent = "Ventana abierta. Completa el CAPTCHA y entra en Roblox; detectaremos tu sesión automáticamente…";
+      captchaPoll = setInterval(async () => {
+        if (closed) return stopCaptchaPoll();
+        try {
+          const value = await proxySession();
+          if (value && (await trySession(value))) {
+            finish(true);
+            return;
+          }
+        } catch {}
+        if (captchaPopup?.closed) {
+          stopCaptchaPoll();
+          const value = await proxySession().catch(() => null);
+          if (value && (await trySession(value))) finish(true);
+        }
+      }, 1500);
+    });
 
     for (const tab of tabs) {
       tab.addEventListener("click", () => {
@@ -612,6 +661,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
       const password = passInput.value;
       if (!username || !password) return fail("Escribe tu usuario y contraseña.");
       passSubmit.disabled = true;
+      captchaBox.hidden = true;
       try {
         const ctype = username.includes("@") ? "Email" : "Username";
         const res = await robloxPostWithCsrf("https://auth.roblox.com/v2/login", {
@@ -639,7 +689,8 @@ function askForSession(expired, { allowCancel = false } = {}) {
         const challengeType = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-type")?.[1]?.toLowerCase() || "";
         const apiMsg = res.json?.errors?.[0]?.message || "";
         if (challengeType.includes("captcha") || /captcha|challenge/i.test(apiMsg)) {
-          throw new Error("Roblox pidió CAPTCHA para este inicio de sesión. Usa la pestaña 'Código rápido' o 'Cookie'.");
+          captchaBox.hidden = false;
+          throw new Error("Roblox pidió verificación CAPTCHA.");
         }
         if (/incorrect|invalid/i.test(apiMsg)) {
           throw new Error("Usuario o contraseña incorrectos.");

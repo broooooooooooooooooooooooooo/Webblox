@@ -1,7 +1,7 @@
-// Animated background themes ("space", "aurora", "dark") for the Webblox launcher.
+// Animated background themes ("space", "aurora", "aero", "dark") for the Webblox launcher.
 // Runs only while the launcher is open so gameplay gets 100% of CPU/GPU.
 
-export const THEMES = ["space", "aurora", "dark"];
+export const THEMES = ["space", "aurora", "aero", "dark"];
 
 let activeStop = null;
 
@@ -181,10 +181,177 @@ export function startThemeBackground(canvas, theme) {
     ctx.globalCompositeOperation = "source-over";
   };
 
+  // Frutiger Aero assets: glossy floating water bubbles, soft bokeh orbs, and light wisps
+  const aeroBokeh = Array.from({ length: 18 }, () => ({
+    x: Math.random(),
+    y: Math.random() * 0.85,
+    r: 22 + Math.random() * 68,
+    speed: 0.008 + Math.random() * 0.015,
+    phase: Math.random() * Math.PI * 2,
+    alpha: 0.06 + Math.random() * 0.11,
+    tint: Math.random() < 0.45 ? "165, 245, 255" : Math.random() < 0.5 ? "255, 255, 255" : "150, 255, 200",
+  }));
+
+  const aeroBubbles = Array.from({ length: 22 }, (_, idx) => ({
+    x: Math.random(),
+    y: Math.random(),
+    r: idx < 5 ? 28 + Math.random() * 26 : 8 + Math.random() * 19,
+    vy: 0.018 + Math.random() * 0.032,
+    swayAmp: 0.008 + Math.random() * 0.014,
+    swayFreq: 0.5 + Math.random() * 0.9,
+    phase: Math.random() * Math.PI * 2,
+    hue: Math.random() < 0.3 ? 160 : 196,
+  }));
+
+  const renderFrutigerAero = (now) => {
+    const t = now * 0.001;
+    ctx.globalCompositeOperation = "source-over";
+
+    // 1. Vibrant Windows 7 / Vista azure-to-horizon sky
+    const sky = ctx.createLinearGradient(0, 0, width * 0.25, height);
+    sky.addColorStop(0, "#053f8c");
+    sky.addColorStop(0.28, "#0f78d8");
+    sky.addColorStop(0.58, "#3ac4f5");
+    sky.addColorStop(0.82, "#a5f0ff");
+    sky.addColorStop(1, "#dafbe8");
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Radiant upper-right Vista sunburst & lens halo
+    const sunX = width * (0.78 + Math.sin(t * 0.14) * 0.03);
+    const sunY = height * (0.16 + Math.cos(t * 0.11) * 0.02);
+    const sun = ctx.createRadialGradient(sunX, sunY, 8, sunX, sunY, Math.max(width, height) * 0.65);
+    sun.addColorStop(0, "rgba(255, 255, 245, 0.92)");
+    sun.addColorStop(0.12, "rgba(215, 250, 255, 0.62)");
+    sun.addColorStop(0.35, "rgba(110, 224, 255, 0.24)");
+    sun.addColorStop(1, "rgba(30, 145, 245, 0)");
+    ctx.fillStyle = sun;
+    ctx.fillRect(0, 0, width, height);
+
+    // 3. Flowing translucent Windows 7 energy ribbons across the sky
+    ctx.globalCompositeOperation = "screen";
+    const aeroRibbons = [
+      { y: 0.36, amp: 56, freq: 0.0028, speed: 0.42, thick: 135, c0: "rgba(255, 255, 255, 0.34)", c1: "rgba(120, 245, 255, 0.20)" },
+      { y: 0.46, amp: 44, freq: 0.0036, speed: -0.31, thick: 115, c0: "rgba(165, 255, 200, 0.28)", c1: "rgba(85, 220, 255, 0.16)" },
+      { y: 0.26, amp: 38, freq: 0.0022, speed: 0.25, thick: 95, c0: "rgba(220, 252, 255, 0.26)", c1: "rgba(140, 235, 255, 0.08)" },
+    ];
+    for (let r = 0; r < aeroRibbons.length; r++) {
+      const rb = aeroRibbons[r];
+      const baseY = height * rb.y;
+      const g = ctx.createLinearGradient(0, baseY - rb.thick, 0, baseY + rb.thick);
+      g.addColorStop(0, "rgba(255,255,255,0)");
+      g.addColorStop(0.42, rb.c1);
+      g.addColorStop(0.62, rb.c0);
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      for (let x = 0; x <= width + 32; x += 32) {
+        const y = baseY + Math.sin(x * rb.freq + t * rb.speed + r * 1.4) * rb.amp - x * 0.08;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      for (let x = width + 32; x >= 0; x -= 32) {
+        const y = baseY + Math.sin(x * rb.freq + t * rb.speed + r * 1.4) * rb.amp - x * 0.08 - rb.thick;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 4. Soft sunlit bokeh circles
+    for (let i = 0; i < aeroBokeh.length; i++) {
+      const b = aeroBokeh[i];
+      const bx = ((b.x + Math.sin(t * 0.18 + b.phase) * 0.03) % 1) * width;
+      const by = (b.y + Math.cos(t * 0.14 + b.phase) * 0.025) * height;
+      const pulse = 0.78 + 0.22 * Math.sin(t * 0.9 + b.phase);
+      const rg = ctx.createRadialGradient(bx, by, b.r * 0.1, bx, by, b.r);
+      rg.addColorStop(0, `rgba(${b.tint}, ${(b.alpha * pulse).toFixed(3)})`);
+      rg.addColorStop(0.75, `rgba(${b.tint}, ${(b.alpha * 0.55 * pulse).toFixed(3)})`);
+      rg.addColorStop(1, `rgba(${b.tint}, 0)`);
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(bx, by, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 5. Rolling emerald Vista hills along the bottom horizon
+    ctx.globalCompositeOperation = "source-over";
+    const hillLayers = [
+      { y: 0.80, amp: 26, freq: 0.0024, speed: 0.16, cTop: "#7af05f", cBot: "#209c44" },
+      { y: 0.86, amp: 20, freq: 0.0033, speed: -0.12, cTop: "#55db4b", cBot: "#127d3c" },
+      { y: 0.92, amp: 14, freq: 0.0041, speed: 0.09, cTop: "#3bc446", cBot: "#0b6133" },
+    ];
+    for (let h = 0; h < hillLayers.length; h++) {
+      const hl = hillLayers[h];
+      const base = height * hl.y;
+      const hg = ctx.createLinearGradient(0, base - 40, 0, height);
+      hg.addColorStop(0, hl.cTop);
+      hg.addColorStop(1, hl.cBot);
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.moveTo(0, height);
+      for (let x = 0; x <= width + 24; x += 24) {
+        const y = base + Math.sin(x * hl.freq + t * hl.speed + h * 2.1) * hl.amp + Math.cos(x * 0.0014 - h) * 18;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(width, height);
+      ctx.closePath();
+      ctx.fill();
+
+      // Sunlit rim highlight along each rolling hill crest
+      ctx.strokeStyle = "rgba(225, 255, 210, 0.42)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let x = 0; x <= width + 24; x += 24) {
+        const y = base + Math.sin(x * hl.freq + t * hl.speed + h * 2.1) * hl.amp + Math.cos(x * 0.0014 - h) * 18;
+        if (x === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    // 6. 3D glossy Frutiger Aero water bubbles floating upward
+    for (let i = 0; i < aeroBubbles.length; i++) {
+      const b = aeroBubbles[i];
+      const yNorm = ((b.y - t * b.vy) % 1.15 + 1.15) % 1.15 - 0.08;
+      const bx = (b.x + Math.sin(t * b.swayFreq + b.phase) * b.swayAmp) * width;
+      const by = yNorm * height;
+
+      // Glass interior & iridescent rim
+      const orb = ctx.createRadialGradient(bx - b.r * 0.28, by - b.r * 0.28, b.r * 0.08, bx, by, b.r);
+      orb.addColorStop(0, "rgba(255, 255, 255, 0.36)");
+      orb.addColorStop(0.55, `hsla(${b.hue}, 92%, 78%, 0.14)`);
+      orb.addColorStop(0.86, `hsla(${b.hue + 14}, 95%, 88%, 0.42)`);
+      orb.addColorStop(1, "rgba(255, 255, 255, 0.68)");
+      ctx.fillStyle = orb;
+      ctx.beginPath();
+      ctx.arc(bx, by, b.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Crisp glass rim
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+      ctx.lineWidth = 1.1;
+      ctx.stroke();
+
+      // Top-left glossy specular crescent
+      ctx.fillStyle = "rgba(255, 255, 255, 0.72)";
+      ctx.beginPath();
+      ctx.ellipse(bx - b.r * 0.33, by - b.r * 0.35, b.r * 0.28, b.r * 0.14, -Math.PI / 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bottom-right caustic bounce light
+      ctx.fillStyle = "rgba(180, 255, 240, 0.38)";
+      ctx.beginPath();
+      ctx.ellipse(bx + b.r * 0.28, by + b.r * 0.36, b.r * 0.22, b.r * 0.09, -Math.PI / 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
+
   const loop = (now) => {
     if (stopped) return;
     if (!document.hidden) {
       if (chosen === "space") renderSpace(now);
+      else if (chosen === "aero") renderFrutigerAero(now);
       else renderAurora(now);
     }
     rafId = requestAnimationFrame(loop);
@@ -198,3 +365,4 @@ export function startThemeBackground(canvas, theme) {
   };
   return activeStop;
 }
+

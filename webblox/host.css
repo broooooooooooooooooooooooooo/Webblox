@@ -27,6 +27,169 @@ body[data-theme="aurora"] {
   --accent: #18d49c;
   --accent-hi: #34ebaf;
 }
+body[data-theme="aero"] {
+  --bg-base: #137bd6;
+  --glass: rgba(226, 246, 255, 0.46);
+  --glass-strong: rgba(235, 250, 255, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.72);
+  --glass-hover: rgba(255, 255, 255, 0.45);
+  --accent: #0f82e6;
+  --accent-hi: #2ca8ff;
+  --ok: #17b849;
+  --warn: #e29b00;
+  --bad: #dc3545;
+  --ink: #0a223b;
+  --muted: #204a70;
+  font-family: "Segoe UI", "Calibri", ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* Windows Vista / 7 Frutiger Aero Glasscraft */
+body[data-theme="aero"] .glass-card {
+  position: relative;
+  background:
+    linear-gradient(162deg, rgba(255, 255, 255, 0.56) 0%, rgba(255, 255, 255, 0.16) 44%, rgba(190, 234, 255, 0.18) 45%, rgba(215, 245, 255, 0.40) 100%);
+  border: 1px solid rgba(18, 72, 128, 0.34);
+  border-radius: 16px;
+  backdrop-filter: blur(22px) saturate(195%) brightness(1.06);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.94),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 14px 36px rgba(6, 46, 94, 0.26);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+body[data-theme="aero"] .topbar {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(220, 244, 255, 0.50) 48%, rgba(184, 228, 252, 0.46) 50%, rgba(222, 246, 255, 0.64) 100%);
+}
+body[data-theme="aero"] .brand-badge {
+  background: linear-gradient(180deg, #86dcff 0%, #2b9bf4 49%, #0e72cc 51%, #38b2ff 100%);
+  border: 1px solid rgba(10, 62, 120, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 4px 14px rgba(15, 118, 218, 0.42);
+}
+body[data-theme="aero"] .nav-tab {
+  color: #163d61;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+body[data-theme="aero"] .nav-tab:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(205, 238, 255, 0.52));
+  color: #06213c;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 2px 8px rgba(14, 78, 138, 0.16);
+}
+body[data-theme="aero"] .nav-tab.is-active {
+  background: linear-gradient(180deg, #88dcff 0%, #37a5f5 48%, #0f76d4 52%, #2b9ef5 100%);
+  border: 1px solid rgba(9, 64, 122, 0.52);
+  color: #ffffff;
+  text-shadow: 0 -1px 0 rgba(0, 48, 102, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 3px 10px rgba(15, 118, 218, 0.34);
+}
+body[data-theme="aero"] .account-pill {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(212, 240, 255, 0.55));
+  border: 1px solid rgba(20, 78, 134, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+body[data-theme="aero"] .account-btn,
+body[data-theme="aero"] .ghost-btn,
+body[data-theme="aero"] .renderer-switch label,
+body[data-theme="aero"] .cache-clear {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0%, rgba(232, 245, 255, 0.68) 49%, rgba(204, 232, 250, 0.65) 51%, rgba(234, 248, 255, 0.82) 100%);
+  border: 1px solid rgba(18, 72, 128, 0.34);
+  color: #0b2945;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 2px 6px rgba(10, 52, 98, 0.12);
+}
+body[data-theme="aero"] .account-btn:hover,
+body[data-theme="aero"] .ghost-btn:hover,
+body[data-theme="aero"] .renderer-switch label:hover {
+  background: linear-gradient(180deg, #ffffff 0%, #dff3ff 49%, #bce5ff 51%, #e5f6ff 100%);
+  border-color: rgba(15, 118, 218, 0.55);
+}
+body[data-theme="aero"] .account-btn.primary,
+body[data-theme="aero"] .search-card button,
+body[data-theme="aero"] .renderer-switch label.is-checked,
+body[data-theme="aero"] .session button:not(.secondary) {
+  background: linear-gradient(180deg, #8ee0ff 0%, #37a6f7 48%, #0d74d2 52%, #299ff6 100%);
+  border: 1px solid rgba(8, 62, 120, 0.55);
+  color: #ffffff;
+  text-shadow: 0 -1px 0 rgba(0, 44, 96, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.88), 0 4px 12px rgba(13, 116, 210, 0.32);
+}
+body[data-theme="aero"] .account-btn.primary:hover,
+body[data-theme="aero"] .search-card button:hover {
+  background: linear-gradient(180deg, #a8e8ff 0%, #4cb4ff 48%, #1682e4 52%, #3fb0ff 100%);
+}
+body[data-theme="aero"] .friend-join,
+body[data-theme="aero"] .game-play-badge {
+  background: linear-gradient(180deg, #a6f797 0%, #41cc4e 48%, #159929 52%, #2ec449 100%);
+  border: 1px solid rgba(12, 98, 28, 0.55);
+  color: #ffffff;
+  text-shadow: 0 -1px 0 rgba(0, 66, 16, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 4px 12px rgba(21, 153, 41, 0.35);
+}
+body[data-theme="aero"] .search-card input,
+body[data-theme="aero"] .session input {
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(18, 72, 128, 0.34);
+  color: #092138;
+  box-shadow: inset 0 2px 4px rgba(12, 54, 100, 0.12), 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+body[data-theme="aero"] .search-card input::placeholder,
+body[data-theme="aero"] .session input::placeholder {
+  color: #466f94;
+}
+body[data-theme="aero"] .launcher-games button,
+body[data-theme="aero"] .friend-card,
+body[data-theme="aero"] .setting-row {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.62) 0%, rgba(224, 245, 255, 0.40) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 4px 14px rgba(10, 56, 106, 0.12);
+}
+body[data-theme="aero"] .launcher-games button:hover,
+body[data-theme="aero"] .friend-card:hover {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0%, rgba(222, 246, 255, 0.68) 100%);
+  border-color: rgba(15, 130, 230, 0.55);
+  box-shadow: inset 0 1px 0 #ffffff, 0 8px 22px rgba(12, 92, 178, 0.22);
+}
+body[data-theme="aero"] .friend-dot {
+  border-color: #e6f6ff;
+}
+body[data-theme="aero"] .friend-presence[data-state="ingame"] {
+  color: #0d8534;
+  font-weight: 700;
+}
+body[data-theme="aero"] .toggle-track {
+  background: linear-gradient(180deg, rgba(160, 194, 224, 0.75), rgba(215, 236, 252, 0.9));
+  border-color: rgba(18, 72, 128, 0.35);
+  box-shadow: inset 0 1px 3px rgba(0, 35, 70, 0.25);
+}
+body[data-theme="aero"] .toggle-switch input:checked + .toggle-track {
+  background: linear-gradient(180deg, #87f07a 0%, #27bd43 52%, #199c32 100%);
+}
+body[data-theme="aero"] .session form {
+  background: linear-gradient(165deg, rgba(242, 251, 255, 0.92), rgba(212, 239, 255, 0.86));
+  border: 1px solid rgba(18, 72, 128, 0.4);
+  box-shadow: inset 0 1px 0 #ffffff, 0 24px 60px rgba(6, 38, 78, 0.38);
+}
+body[data-theme="aero"] .session .session-tabs {
+  background: rgba(16, 78, 138, 0.12);
+  border-color: rgba(18, 72, 128, 0.22);
+}
+body[data-theme="aero"] .session .session-tab {
+  color: #1c4469;
+}
+body[data-theme="aero"] .session .session-tab.is-active {
+  background: linear-gradient(180deg, #88dcff 0%, #37a5f5 48%, #0f76d4 52%, #2b9ef5 100%);
+  color: #ffffff;
+}
+body[data-theme="aero"] .session button.secondary {
+  background: linear-gradient(180deg, #ffffff, #d9ecfa);
+  color: #0c2a46;
+  border: 1px solid rgba(18, 72, 128, 0.35);
+}
+body[data-theme="aero"] .quick-code {
+  background: rgba(255, 255, 255, 0.82);
+  color: #0a2744;
+  border-color: rgba(18, 72, 128, 0.3);
+}
 
 html, body {
   width: 100%; height: 100%; overflow: hidden;

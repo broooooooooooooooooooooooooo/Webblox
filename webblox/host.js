@@ -1400,6 +1400,7 @@ function showLauncher() {
           <fieldset class="renderer-switch">
             <label><input type="radio" name="theme" value="space"> Space</label>
             <label><input type="radio" name="theme" value="aurora"> Aurora</label>
+            <label><input type="radio" name="theme" value="aero"> Frutiger Aero</label>
             <label><input type="radio" name="theme" value="dark"> Oscuro</label>
           </fieldset>
         </div>

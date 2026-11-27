@@ -6,7 +6,7 @@
         createScript: function (value) { return value; },
         createScriptURL: function (value) {
           var url = new URL(value, location.href);
-          if (url.origin === location.origin || url.protocol === "blob:") return value;
+          if (url.origin === location.origin || url.protocol === "blob:" || url.protocol === "data:") return value;
           throw new TypeError("Blocked untrusted script URL: " + value);
         }
       });

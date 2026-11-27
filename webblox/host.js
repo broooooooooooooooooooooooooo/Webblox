@@ -1846,6 +1846,44 @@ function startFpsHud() {
   requestAnimationFrame(tick);
 }
 
+function unlockGameAudio() {
+  const NativeAudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
+  if (!NativeAudioContext || NativeAudioContext.__bloxAudio) return;
+
+  const contexts = new Set();
+  const resumeAll = () => {
+    for (const ctx of contexts) {
+      if (ctx.state === "closed") {
+        contexts.delete(ctx);
+      } else if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+    }
+  };
+
+  function WrappedAudioContext(...args) {
+    const ctx = new NativeAudioContext(...args);
+    contexts.add(ctx);
+    ctx.addEventListener?.("statechange", () => {
+      if (ctx.state === "closed") contexts.delete(ctx);
+    });
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    return ctx;
+  }
+  WrappedAudioContext.prototype = NativeAudioContext.prototype;
+  Object.setPrototypeOf(WrappedAudioContext, NativeAudioContext);
+  WrappedAudioContext.__bloxAudio = true;
+
+  try {
+    globalThis.AudioContext = WrappedAudioContext;
+    if (globalThis.webkitAudioContext) globalThis.webkitAudioContext = WrappedAudioContext;
+  } catch {}
+
+  for (const eventName of ["pointerdown", "mousedown", "keydown", "touchstart", "click"]) {
+    window.addEventListener(eventName, resumeAll, { capture: true, passive: true });
+  }
+}
+
 async function boot() {
   const placeId = new URLSearchParams(location.search).get("placeId");
   const joining = Boolean(placeId && /^[1-9]\d{0,18}$/.test(placeId));
@@ -1861,6 +1899,7 @@ async function boot() {
   if (!joining) return showLauncher();
   stopThemeBackground(document.getElementById("theme-bg"));
   await askWorker({ type: "blox-perf-flags", perfMode: savedPerfMode(), ultraFps: savedUltraFps() });
+  unlockGameAudio();
   applyPerformanceOptimizations();
   startFpsHud();
   say("Comprobando tu sesión de Roblox…");

@@ -200,7 +200,7 @@ async function crossOrigin(request, clientId) {
 }
 
 // Performance FFlags toggled from the launcher (saved via blox-perf-flags message).
-let perfFlags = { perfMode: true, ultraFps: false };
+let perfFlags = { perfMode: true, ultraFps: false, fpsCap: "240" };
 
 // Lets the page pick the renderer with ?renderer=webgl|webgpu (WasmPlayer.js
 // only reads it with this flag on); host.js uses it to keep old Chrome off WebGPU.
@@ -210,9 +210,12 @@ function withLocalFlags(text) {
     const s = flags?.applicationSettings;
     if (s) {
       s.FFlagWebClientRenderQueryParams = "True";
+      if (perfFlags.fpsCap) {
+        s.DFIntTaskSchedulerTargetFps = String(perfFlags.fpsCap);
+      }
       if (perfFlags.perfMode) {
         s.DFFlagDisableDPIScale = "True";
-        s.DFIntTaskSchedulerTargetFps = "240";
+        if (!perfFlags.fpsCap) s.DFIntTaskSchedulerTargetFps = "240";
         s.FFlagDebugDisableTelemetryV2Event = "True";
         s.FFlagDebugDisableTelemetryV2Stat = "True";
         s.FFlagDebugDisableTelemetryV2Counter = "True";
@@ -457,7 +460,12 @@ self.addEventListener("message", (event) => {
   const message = event.data;
   const answer = (value) => event.ports[0]?.postMessage(value);
   if (message?.type === "blox-perf-flags") {
-    perfFlags = { perfMode: Boolean(message.perfMode), ultraFps: Boolean(message.ultraFps) };
+    const fps = String(message.fpsCap || "240");
+    perfFlags = {
+      perfMode: Boolean(message.perfMode),
+      ultraFps: Boolean(message.ultraFps),
+      fpsCap: /^\d{2,4}$/.test(fps) ? fps : "240",
+    };
     answer(true);
   }
   else if (message?.type === "blox-visit") event.waitUntil(recordVisit(message.placeId).catch(() => {}));

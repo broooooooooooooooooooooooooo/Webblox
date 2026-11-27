@@ -688,6 +688,10 @@ const THEME_KEY = "blox.theme";
 const SHOW_FPS_KEY = "blox.showFps";
 const PERF_MODE_KEY = "blox.perfMode";
 const ULTRA_FPS_KEY = "blox.ultraFps";
+const FPS_CAP_KEY = "blox.fpsCap";
+const FPS_CAPS = ["60", "120", "144", "240", "999"];
+const MUTE_AUDIO_KEY = "blox.muteAudio";
+const WAKE_LOCK_KEY = "blox.wakeLock";
 const RECENT_KEY = "blox.recentPlaces";
 
 function readRecentPlaces() {
@@ -872,6 +876,23 @@ function saveBool(key, value) {
 const savedShowFps = () => savedBool(SHOW_FPS_KEY, false);
 const savedPerfMode = () => savedBool(PERF_MODE_KEY, true);
 const savedUltraFps = () => savedBool(ULTRA_FPS_KEY, false);
+const savedMuteAudio = () => savedBool(MUTE_AUDIO_KEY, false);
+const savedWakeLock = () => savedBool(WAKE_LOCK_KEY, true);
+
+function savedFpsCap() {
+  try {
+    const value = localStorage.getItem(FPS_CAP_KEY);
+    return FPS_CAPS.includes(value) ? value : "240";
+  } catch {
+    return "240";
+  }
+}
+
+function saveFpsCap(value) {
+  try {
+    localStorage.setItem(FPS_CAP_KEY, FPS_CAPS.includes(value) ? value : "240");
+  } catch {}
+}
 
 function play(placeId, serverId = null) {
   saveRecentPlace(placeId);
@@ -891,17 +912,24 @@ function gameItem(game) {
   const item = document.createElement("li");
   const button = document.createElement("button");
   button.type = "button";
+  const thumbWrap = document.createElement("div");
+  thumbWrap.className = "game-thumb-wrap";
   const icon = document.createElement("img");
   icon.alt = "";
   icon.loading = "lazy";
   if (game.icon) icon.src = game.icon;
+  const playBadge = document.createElement("span");
+  playBadge.className = "game-play-badge";
+  playBadge.setAttribute("aria-hidden", "true");
+  playBadge.textContent = "▶";
+  thumbWrap.append(icon, playBadge);
   const name = document.createElement("span");
   name.className = "name";
   name.textContent = game.name;
   const meta = document.createElement("span");
   meta.className = "meta";
   meta.textContent = [game.creator, Number.isFinite(game.players) ? `${game.players.toLocaleString("es")} jugando` : ""].filter(Boolean).join(" · ");
-  button.append(icon, name, meta);
+  button.append(thumbWrap, name, meta);
   button.addEventListener("click", () => play(game.placeId));
   item.append(button);
   return item;
@@ -1012,75 +1040,176 @@ function showLauncher() {
   launcher.className = "launcher";
   launcher.innerHTML = `
     <header class="glass-card topbar">
-      <div class="brand-row">
-        <span class="brand-badge">W</span>
-        <span class="brand-title">Webblox</span>
+      <div class="topbar-left">
+        <div class="brand-row">
+          <span class="brand-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor">
+              <path d="M5.4 2.1 21.9 6.6 17.4 23.1 0.9 18.6 5.4 2.1Zm4.8 7.5-1.5 5.4 5.4 1.5 1.5-5.4-5.4-1.5Z"/>
+            </svg>
+          </span>
+          <span class="brand-title">Webblox</span>
+        </div>
+        <nav class="nav-tabs" aria-label="Navegación">
+          <button type="button" class="nav-tab is-active" data-tab="home">Inicio</button>
+          <button type="button" class="nav-tab" data-tab="settings">Configuración</button>
+        </nav>
       </div>
       <div class="account-controls">
-        <span class="account-label">Comprobando sesión…</span>
+        <div class="account-pill">
+          <img class="account-avatar" alt="" hidden>
+          <span class="account-label">Comprobando sesión…</span>
+        </div>
         <button type="button" class="account-btn" hidden></button>
       </div>
     </header>
-    <section class="glass-card search-card">
-      <form role="search">
-        <input type="search" placeholder="Busca juegos o pega un enlace / Place ID de Roblox" aria-label="Busca juegos o pega un enlace de juego" autocomplete="off" spellcheck="false">
-        <button type="submit">Buscar</button>
-      </form>
-      <p class="launcher-status" role="status"></p>
-      <ul class="launcher-games"></ul>
-    </section>
-    <section class="glass-card recent-card">
-      <div class="section-head">
-        <h2>Juegos recientes</h2>
-        <button type="button" class="ghost-btn recent-clear">Limpiar historial</button>
-      </div>
-      <p class="friends-status recent-status">Cargando recientes…</p>
-      <ul class="launcher-games recent-games"></ul>
-    </section>
-    <section class="glass-card friends-card" hidden>
-      <div class="section-head">
-        <h2>Amigos</h2>
-        <button type="button" class="ghost-btn friends-refresh">Actualizar</button>
-      </div>
-      <p class="friends-status">Cargando amigos…</p>
-      <ul class="friends-list"></ul>
-    </section>
-    <section class="glass-card settings-grid">
-      <fieldset class="renderer-switch">
-        <legend>Tema</legend>
-        <label><input type="radio" name="theme" value="space"> Space</label>
-        <label><input type="radio" name="theme" value="aurora"> Aurora</label>
-        <label><input type="radio" name="theme" value="dark"> Oscuro</label>
-      </fieldset>
-      <fieldset class="renderer-switch">
-        <legend>Gráficos</legend>
-        <label><input type="radio" name="renderer" value=""> Automático</label>
-        <label><input type="radio" name="renderer" value="webgpu"> WebGPU</label>
-        <label><input type="radio" name="renderer" value="webgl"> WebGL</label>
-      </fieldset>
-      <p class="renderer-hint"></p>
-      <fieldset class="renderer-switch quality-switch">
-        <legend>Calidad</legend>
-        <label><input type="radio" name="scale" value="1"> Alta</label>
-        <label><input type="radio" name="scale" value="0.75"> Media</label>
-        <label><input type="radio" name="scale" value="0.5"> Rendimiento</label>
-        <label><input type="radio" name="scale" value="0.4"> Muy baja</label>
-      </fieldset>
-      <p class="renderer-hint quality-hint"></p>
-      <div class="toggle-row">
-        <label class="toggle-pill"><input type="checkbox" id="toggleFps"> Mostrar FPS en una esquina</label>
-        <label class="toggle-pill"><input type="checkbox" id="togglePerf"> Optimizar GPU y HiDPI</label>
-        <label class="toggle-pill"><input type="checkbox" id="toggleUltra"> Modo Ultra FPS (sin sombras, PostFX ni hierba)</label>
-      </div>
-    </section>
-    <section class="glass-card downloader" aria-labelledby="downloader-title">
-      <h2 id="downloader-title">Motor de Roblox</h2>
-      <p class="downloader-text">Comprobando…</p>
-      <progress class="downloader-bar" max="1" value="0" hidden></progress>
-      <button type="button" class="downloader-button" hidden>Descargar</button>
-      <p class="cache-line" hidden><span class="cache-text"></span> <button type="button" class="cache-clear">Vaciar</button></p>
-    </section>`;
 
+    <div class="tab-panel" data-panel="home">
+      <section class="glass-card search-card">
+        <form role="search">
+          <input type="search" placeholder="Buscar experiencias o pegar enlace / Place ID de Roblox…" aria-label="Busca juegos o pega un enlace de juego" autocomplete="off" spellcheck="false">
+          <button type="submit">Buscar</button>
+        </form>
+        <p class="launcher-status" role="status"></p>
+        <ul class="launcher-games"></ul>
+      </section>
+
+      <section class="glass-card recent-card">
+        <div class="section-head">
+          <h2>Continuar</h2>
+          <button type="button" class="ghost-btn recent-clear">Limpiar historial</button>
+        </div>
+        <p class="friends-status recent-status">Cargando recientes…</p>
+        <ul class="launcher-games recent-games"></ul>
+      </section>
+
+      <section class="glass-card friends-card" hidden>
+        <div class="section-head">
+          <h2>Amigos</h2>
+          <button type="button" class="ghost-btn friends-refresh">Actualizar</button>
+        </div>
+        <p class="friends-status">Cargando amigos…</p>
+        <ul class="friends-list"></ul>
+      </section>
+    </div>
+
+    <div class="tab-panel settings-section" data-panel="settings" hidden>
+      <section class="glass-card settings-group">
+        <h2 class="settings-group-title">Apariencia y Tema</h2>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Tema del launcher</span>
+            <span class="setting-desc">Fondo animado con transparencia (se pausa automáticamente al entrar a un juego para dar 100 % de GPU).</span>
+          </div>
+          <fieldset class="renderer-switch">
+            <label><input type="radio" name="theme" value="space"> Space</label>
+            <label><input type="radio" name="theme" value="aurora"> Aurora</label>
+            <label><input type="radio" name="theme" value="dark"> Oscuro</label>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="glass-card settings-group">
+        <h2 class="settings-group-title">Gráficos y Motor de Roblox</h2>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">API gráfica</span>
+            <span class="setting-desc renderer-hint"></span>
+          </div>
+          <fieldset class="renderer-switch">
+            <label><input type="radio" name="renderer" value=""> Automático</label>
+            <label><input type="radio" name="renderer" value="webgpu"> WebGPU</label>
+            <label><input type="radio" name="renderer" value="webgl"> WebGL</label>
+          </fieldset>
+        </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Escala de resolución</span>
+            <span class="setting-desc quality-hint"></span>
+          </div>
+          <fieldset class="renderer-switch quality-switch">
+            <label><input type="radio" name="scale" value="1"> Alta</label>
+            <label><input type="radio" name="scale" value="0.75"> Media</label>
+            <label><input type="radio" name="scale" value="0.5"> Rendimiento</label>
+            <label><input type="radio" name="scale" value="0.4"> Muy baja</label>
+          </fieldset>
+        </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Límite de FPS</span>
+            <span class="setting-desc">Controla el máximo de fotogramas por segundo del motor (FFlag TaskSchedulerTargetFps).</span>
+          </div>
+          <fieldset class="renderer-switch">
+            <label><input type="radio" name="fpsCap" value="60"> 60</label>
+            <label><input type="radio" name="fpsCap" value="120"> 120</label>
+            <label><input type="radio" name="fpsCap" value="144"> 144</label>
+            <label><input type="radio" name="fpsCap" value="240"> 240</label>
+            <label><input type="radio" name="fpsCap" value="999"> Sin límite</label>
+          </fieldset>
+        </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Optimizar GPU y HiDPI</span>
+            <span class="setting-desc">Activa Direct Scanout (alpha opaco), desactiva MSAA/HiDPI y prioriza la GPU dedicada.</span>
+          </div>
+          <label class="toggle-switch"><input type="checkbox" id="togglePerf"><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Modo Ultra FPS</span>
+            <span class="setting-desc">Desactiva sombras, efectos PostFX y hierba 3D para exprimir el máximo de FPS.</span>
+          </div>
+          <label class="toggle-switch"><input type="checkbox" id="toggleUltra"><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Mostrar contador de FPS</span>
+            <span class="setting-desc">Muestra los FPS reales de la GPU y los milisegundos por frame en la esquina superior izquierda.</span>
+          </div>
+          <label class="toggle-switch"><input type="checkbox" id="toggleFps"><span class="toggle-track"></span></label>
+        </div>
+      </section>
+
+      <section class="glass-card settings-group">
+        <h2 class="settings-group-title">Audio y Pantalla</h2>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Silenciar audio del juego</span>
+            <span class="setting-desc">Silencia completamente el sonido del motor dentro de los juegos.</span>
+          </div>
+          <label class="toggle-switch"><input type="checkbox" id="toggleMute"><span class="toggle-track"></span></label>
+        </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Mantener pantalla encendida</span>
+            <span class="setting-desc">Evita que el equipo suspenda la pantalla mientras estás jugando (Screen Wake Lock).</span>
+          </div>
+          <label class="toggle-switch"><input type="checkbox" id="toggleWake"><span class="toggle-track"></span></label>
+        </div>
+      </section>
+
+      <section class="glass-card downloader" aria-labelledby="downloader-title">
+        <div class="section-head">
+          <h2 id="downloader-title">Motor y Almacenamiento</h2>
+          <button type="button" class="ghost-btn settings-reset">Restablecer configuración</button>
+        </div>
+        <p class="downloader-text">Comprobando…</p>
+        <progress class="downloader-bar" max="1" value="0" hidden></progress>
+        <button type="button" class="downloader-button" hidden>Descargar</button>
+        <p class="cache-line" hidden><span class="cache-text"></span> <button type="button" class="cache-clear">Vaciar</button></p>
+      </section>
+    </div>`;
+
+  const navTabs = [...launcher.querySelectorAll(".nav-tab")];
+  const panels = [...launcher.querySelectorAll(".tab-panel")];
+  for (const tab of navTabs) {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.tab;
+      for (const t of navTabs) t.classList.toggle("is-active", t === tab);
+      for (const p of panels) p.hidden = p.dataset.panel !== target;
+    });
+  }
+
+  const accountAvatar = launcher.querySelector(".account-avatar");
   const accountLabel = launcher.querySelector(".account-label");
   const accountBtn = launcher.querySelector(".account-btn");
   const recentStatus = launcher.querySelector(".recent-status");
@@ -1136,8 +1265,22 @@ function showLauncher() {
   };
   friendsRefresh.addEventListener("click", () => void loadFriends());
 
+  const loadUserAvatar = async (userId) => {
+    try {
+      const res = await robloxJson(
+        `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=150x150&format=Png&isCircular=true`,
+      );
+      const url = res?.data?.[0]?.imageUrl;
+      if (url) {
+        accountAvatar.src = url;
+        accountAvatar.hidden = false;
+      }
+    } catch {}
+  };
+
   const refreshAccount = async () => {
     accountBtn.hidden = true;
+    accountAvatar.hidden = true;
     if (!savedSession()) {
       const proxied = await proxySession().catch(() => null);
       if (proxied) storeSession(proxied);
@@ -1146,22 +1289,26 @@ function showLauncher() {
     accountBtn.hidden = false;
     if (user?.name) {
       activeUserId = user.id ?? null;
-      accountLabel.textContent = `${user.displayName ? `${user.displayName} (@${user.name})` : `@${user.name}`}${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
+      accountLabel.textContent = `${user.displayName ? `${user.displayName} (@${user.name})` : `@${user.name}`}${WISP === DIRECT_WISP_URL ? " · Direct" : ""}`;
       accountBtn.textContent = "Cerrar sesión";
       accountBtn.classList.remove("primary");
       accountBtn.onclick = () => {
         forgetSession();
         activeUserId = null;
+        accountAvatar.hidden = true;
         friendsCard.hidden = true;
         friendsList.replaceChildren();
         void refreshAccount();
       };
-      if (activeUserId) void loadFriends();
+      if (activeUserId) {
+        void loadUserAvatar(activeUserId);
+        void loadFriends();
+      }
     } else {
       activeUserId = null;
       friendsCard.hidden = true;
       friendsList.replaceChildren();
-      accountLabel.textContent = `Sin sesión${WISP === DIRECT_WISP_URL ? " · Direct Sockets" : ""}`;
+      accountLabel.textContent = `Sin sesión${WISP === DIRECT_WISP_URL ? " · Direct" : ""}`;
       accountBtn.textContent = "Iniciar sesión";
       accountBtn.classList.add("primary");
       accountBtn.onclick = async () => {
@@ -1200,10 +1347,10 @@ function showLauncher() {
   hint.textContent = hints[current];
   const qualityHint = launcher.querySelector(".quality-hint");
   const qualityHints = {
-    "1": "Resolución completa.",
-    "0.75": "Dibuja ~56 % de los píxeles: más FPS y menos consumo de memoria gráfica.",
+    "1": "Resolución completa (100 %).",
+    "0.75": "Dibuja ~56 % de los píxeles: más FPS y menos consumo de GPU.",
     "0.5": "Dibuja 25 % de los píxeles: gran aumento de FPS.",
-    "0.4": "Dibuja 16 % de los píxeles: máximo rendimiento en portátiles / GPU integrada.",
+    "0.4": "Dibuja 16 % de los píxeles: máximo rendimiento en GPU integrada.",
   };
   const scale = savedScale();
   for (const radio of launcher.querySelectorAll('input[name="scale"]')) {
@@ -1214,6 +1361,12 @@ function showLauncher() {
     });
   }
   qualityHint.textContent = qualityHints[scale];
+
+  const fpsCap = savedFpsCap();
+  for (const radio of launcher.querySelectorAll('input[name="fpsCap"]')) {
+    radio.checked = radio.value === fpsCap;
+    radio.addEventListener("change", () => saveFpsCap(radio.value));
+  }
 
   const fpsToggle = launcher.querySelector("#toggleFps");
   fpsToggle.checked = savedShowFps();
@@ -1226,6 +1379,21 @@ function showLauncher() {
   const ultraToggle = launcher.querySelector("#toggleUltra");
   ultraToggle.checked = savedUltraFps();
   ultraToggle.addEventListener("change", () => saveBool(ULTRA_FPS_KEY, ultraToggle.checked));
+
+  const muteToggle = launcher.querySelector("#toggleMute");
+  muteToggle.checked = savedMuteAudio();
+  muteToggle.addEventListener("change", () => saveBool(MUTE_AUDIO_KEY, muteToggle.checked));
+
+  const wakeToggle = launcher.querySelector("#toggleWake");
+  wakeToggle.checked = savedWakeLock();
+  wakeToggle.addEventListener("change", () => saveBool(WAKE_LOCK_KEY, wakeToggle.checked));
+
+  launcher.querySelector(".settings-reset").addEventListener("click", () => {
+    for (const key of [THEME_KEY, RENDERER_KEY, SCALE_KEY, FPS_CAP_KEY, SHOW_FPS_KEY, PERF_MODE_KEY, ULTRA_FPS_KEY, MUTE_AUDIO_KEY, WAKE_LOCK_KEY]) {
+      try { localStorage.removeItem(key); } catch {}
+    }
+    location.reload();
+  });
 
   void showCacheLine(launcher);
   if (!COMPAT.ok) {
@@ -1693,7 +1861,7 @@ function showUnsupported() {
 }
 
 function keepScreenAwake() {
-  if (!navigator.wakeLock?.request) return;
+  if (!savedWakeLock() || !navigator.wakeLock?.request) return;
   let lock = null;
   const acquire = () => {
     if (document.visibilityState !== "visible") return;
@@ -1850,8 +2018,10 @@ function unlockGameAudio() {
   const NativeAudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!NativeAudioContext || NativeAudioContext.__bloxAudio) return;
 
+  const muted = savedMuteAudio();
   const contexts = new Set();
   const resumeAll = () => {
+    if (muted) return;
     for (const ctx of contexts) {
       if (ctx.state === "closed") {
         contexts.delete(ctx);
@@ -1867,7 +2037,11 @@ function unlockGameAudio() {
     ctx.addEventListener?.("statechange", () => {
       if (ctx.state === "closed") contexts.delete(ctx);
     });
-    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    if (muted) {
+      if (ctx.state === "running") ctx.suspend().catch(() => {});
+    } else if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
     return ctx;
   }
   WrappedAudioContext.prototype = NativeAudioContext.prototype;
@@ -1879,8 +2053,10 @@ function unlockGameAudio() {
     if (globalThis.webkitAudioContext) globalThis.webkitAudioContext = WrappedAudioContext;
   } catch {}
 
-  for (const eventName of ["pointerdown", "mousedown", "keydown", "touchstart", "click"]) {
-    window.addEventListener(eventName, resumeAll, { capture: true, passive: true });
+  if (!muted) {
+    for (const eventName of ["pointerdown", "mousedown", "keydown", "touchstart", "click"]) {
+      window.addEventListener(eventName, resumeAll, { capture: true, passive: true });
+    }
   }
 }
 
@@ -1898,7 +2074,7 @@ async function boot() {
   // place id" and exits, so pick one here first.
   if (!joining) return showLauncher();
   stopThemeBackground(document.getElementById("theme-bg"));
-  await askWorker({ type: "blox-perf-flags", perfMode: savedPerfMode(), ultraFps: savedUltraFps() });
+  await askWorker({ type: "blox-perf-flags", perfMode: savedPerfMode(), ultraFps: savedUltraFps(), fpsCap: savedFpsCap() });
   unlockGameAudio();
   applyPerformanceOptimizations();
   startFpsHud();

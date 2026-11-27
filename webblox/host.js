@@ -565,7 +565,13 @@ function askForSession(expired, { allowCancel = false } = {}) {
     for (const btn of cancelBtns) btn.textContent = allowCancel ? "Cerrar" : "Volver";
 
     let captchaPopup = null;
+    let captchaReadyTimer = 0;
     let activeCaptcha = null; // { challengeId, unifiedCaptchaId, actionType, url, creds }
+
+    const clearCaptchaTimer = () => {
+      if (captchaReadyTimer) clearTimeout(captchaReadyTimer);
+      captchaReadyTimer = 0;
+    };
 
     const decodeChallengeMeta = (raw) => {
       if (!raw) return null;
@@ -584,6 +590,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
     const finish = (ok = true) => {
       closed = true;
       stopPolling();
+      clearCaptchaTimer();
       window.removeEventListener("message", onCaptchaMessage);
       try { captchaPopup?.close(); } catch {}
       shade.remove();
@@ -603,6 +610,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
           ticket: res.json.twoStepVerificationData.ticket,
           mediaType: res.json.twoStepVerificationData.mediaType || "Email",
         };
+        clearCaptchaTimer();
         captchaBox.hidden = true;
         captchaFrame.hidden = true;
         captchaFrame.removeAttribute("src");
@@ -616,23 +624,25 @@ function askForSession(expired, { allowCancel = false } = {}) {
         finish(true);
         return true;
       }
-      const challengeId = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-id")?.[1] || "";
-      const challengeType = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-type")?.[1]?.toLowerCase() || "";
+      const challengeId = (res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-id")?.[1] || "").trim();
+      const challengeType = (res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-type")?.[1] || "").trim().toLowerCase();
       const rawMeta = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-metadata")?.[1] || "";
       const meta = decodeChallengeMeta(rawMeta);
       const apiMsg = res.json?.errors?.[0]?.message || "";
+      const blob = meta?.dataExchangeBlob || meta?.dxBlob || meta?.blob || "";
+      const pkey = meta?.publicKey || "476068BF-9607-4799-B53D-966BE98E2B81";
 
-      if (challengeType === "captcha" && challengeId && meta?.dataExchangeBlob) {
+      if ((challengeType === "captcha" || meta?.unifiedCaptchaId) && challengeId && blob) {
         const hash = new URLSearchParams({
           id: challengeId,
-          blob: meta.dataExchangeBlob,
-          pkey: "476068BF-9607-4799-B53D-966BE98E2B81",
+          blob,
+          pkey,
         }).toString();
         const url = `${CAPTCHA_PAGE}#${hash}`;
         activeCaptcha = {
           challengeId,
-          unifiedCaptchaId: meta.unifiedCaptchaId || challengeId,
-          actionType: meta.actionType || "Login",
+          unifiedCaptchaId: meta?.unifiedCaptchaId || challengeId,
+          actionType: meta?.actionType || "Login",
           url,
           creds,
         };
@@ -641,13 +651,19 @@ function askForSession(expired, { allowCancel = false } = {}) {
         captchaFrame.src = url;
         captchaFrame.hidden = false;
         captchaBox.hidden = false;
+        clearCaptchaTimer();
+        captchaReadyTimer = setTimeout(() => {
+          if (!closed && activeCaptcha?.challengeId === challengeId) {
+            captchaHint.textContent = "Si el puzzle no aparece dentro del recuadro, pulsa «Abrir en ventana» para resolverlo allí.";
+          }
+        }, 7000);
         return false;
       }
 
       if (challengeType.includes("captcha") || /captcha|challenge/i.test(apiMsg)) {
         captchaFrame.hidden = true;
         captchaBox.hidden = false;
-        captchaHint.textContent = "Roblox pidió verificación. Usa 'Código rápido' para entrar sin CAPTCHA.";
+        captchaHint.textContent = "Roblox pidió verificación. Usa «Usar Código rápido» para entrar sin CAPTCHA.";
         throw new Error("Roblox pidió verificación CAPTCHA.");
       }
       if (/incorrect|invalid/i.test(apiMsg)) {
@@ -662,11 +678,20 @@ function askForSession(expired, { allowCancel = false } = {}) {
       if (!msg || typeof msg !== "object" || !activeCaptcha) return;
       if (msg.challengeId && msg.challengeId !== activeCaptcha.challengeId) return;
 
+      if (msg.type === "blox-captcha-ready") {
+        clearCaptchaTimer();
+        captchaHint.textContent = "Resuelve el CAPTCHA aquí abajo para completar el inicio de sesión:";
+        return;
+      }
+
       if (msg.type === "blox-captcha-error") {
-        captchaHint.textContent = `No se pudo cargar inline (${msg.error || "error"}). Prueba "Abrir en ventana" o "Usar Código rápido".`;
+        clearCaptchaTimer();
+        captchaHint.textContent = `No se pudo cargar inline (${msg.error || "error"}). Pulsa "Abrir en ventana" o "Usar Código rápido".`;
         return;
       }
       if (msg.type !== "blox-captcha-token" || !msg.token) return;
+
+      clearCaptchaTimer();
 
       const current = activeCaptcha;
       activeCaptcha = null;

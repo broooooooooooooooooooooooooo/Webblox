@@ -1482,6 +1482,13 @@ function showLauncher() {
           </div>
           <label class="toggle-switch"><input type="checkbox" id="toggleWake"><span class="toggle-track"></span></label>
         </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Modo YouTube (<code>expectedFrame</code>)</span>
+            <span class="setting-desc">Pulsa <b>Ctrl + Alt + Y</b> en cualquier momento (incluso dentro del juego) para abrir YouTube guardando tus datos y tu partida.</span>
+          </div>
+          <button type="button" class="ghost-btn expected-open-btn">Abrir (Ctrl+Alt+Y)</button>
+        </div>
       </section>
 
       <section class="glass-card downloader" aria-labelledby="downloader-title">
@@ -1705,6 +1712,8 @@ function showLauncher() {
   const wakeToggle = launcher.querySelector("#toggleWake");
   wakeToggle.checked = savedWakeLock();
   wakeToggle.addEventListener("change", () => saveBool(WAKE_LOCK_KEY, wakeToggle.checked));
+
+  launcher.querySelector(".expected-open-btn")?.addEventListener("click", () => toggleExpectedFrame(true));
 
   launcher.querySelector(".settings-reset").addEventListener("click", () => {
     for (const key of [THEME_KEY, RENDERER_KEY, SCALE_KEY, FPS_CAP_KEY, WISP_KEY, SHOW_FPS_KEY, PERF_MODE_KEY, ULTRA_FPS_KEY, MUTE_AUDIO_KEY, WAKE_LOCK_KEY]) {
@@ -2332,22 +2341,27 @@ function startFpsHud() {
   requestAnimationFrame(tick);
 }
 
+let expectedAudioSuspended = false;
+let expectedAudioHook = null;
+
 function unlockGameAudio() {
   const NativeAudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
   if (!NativeAudioContext || NativeAudioContext.__bloxAudio) return;
 
   const muted = savedMuteAudio();
   const contexts = new Set();
-  const resumeAll = () => {
-    if (muted) return;
+  const syncAll = () => {
     for (const ctx of contexts) {
       if (ctx.state === "closed") {
         contexts.delete(ctx);
+      } else if (muted || expectedAudioSuspended) {
+        if (ctx.state === "running") ctx.suspend().catch(() => {});
       } else if (ctx.state === "suspended") {
         ctx.resume().catch(() => {});
       }
     }
   };
+  expectedAudioHook = syncAll;
 
   function WrappedAudioContext(...args) {
     const ctx = new NativeAudioContext(...args);
@@ -2355,7 +2369,7 @@ function unlockGameAudio() {
     ctx.addEventListener?.("statechange", () => {
       if (ctx.state === "closed") contexts.delete(ctx);
     });
-    if (muted) {
+    if (muted || expectedAudioSuspended) {
       if (ctx.state === "running") ctx.suspend().catch(() => {});
     } else if (ctx.state === "suspended") {
       ctx.resume().catch(() => {});
@@ -2373,10 +2387,67 @@ function unlockGameAudio() {
 
   if (!muted) {
     for (const eventName of ["pointerdown", "mousedown", "keydown", "touchstart", "click"]) {
-      window.addEventListener(eventName, resumeAll, { capture: true, passive: true });
+      window.addEventListener(eventName, syncAll, { capture: true, passive: true });
     }
   }
 }
+
+const EXPECTED_OPEN_KEY = "blox.expectedFrame.open";
+let setExpectedFrameState = () => {};
+const toggleExpectedFrame = (force) => setExpectedFrameState(force);
+
+function setupExpectedFrame() {
+  const frame = document.getElementById("expectedFrame");
+  if (!frame) return;
+
+  const apply = (open) => {
+    const next = Boolean(open);
+    if (next && !frame.getAttribute("src")) {
+      frame.src = new URL("yt.html", ROOT).href;
+    }
+    frame.hidden = !next;
+    expectedAudioSuspended = next;
+    expectedAudioHook?.();
+    try {
+      localStorage.setItem(EXPECTED_OPEN_KEY, next ? "1" : "0");
+    } catch {}
+    if (next) {
+      if (document.pointerLockElement) {
+        try { document.exitPointerLock(); } catch {}
+      }
+      frame.contentWindow?.postMessage({ type: "blox-yt-save" }, location.origin);
+      frame.focus();
+    } else {
+      frame.contentWindow?.postMessage({ type: "blox-yt-pause" }, location.origin);
+      document.getElementById("canvas")?.focus?.();
+    }
+  };
+
+  setExpectedFrameState = (force) => {
+    const next = typeof force === "boolean" ? force : frame.hidden;
+    apply(next);
+  };
+
+  window.addEventListener("keydown", (event) => {
+    if (event.ctrlKey && event.altKey && (event.key.toLowerCase() === "y" || event.code === "KeyY")) {
+      event.preventDefault();
+      event.stopPropagation();
+      setExpectedFrameState();
+    }
+  }, { capture: true });
+
+  window.addEventListener("message", (event) => {
+    if (event.origin === location.origin && event.data?.type === "blox-toggle-expected") {
+      setExpectedFrameState();
+    }
+  });
+
+  if (savedBool(EXPECTED_OPEN_KEY, false)) {
+    apply(true);
+  }
+}
+
+setupExpectedFrame();
 
 async function boot() {
   const placeId = new URLSearchParams(location.search).get("placeId");

@@ -1,0 +1,93 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0f0f0f;
+  --surface: #181818;
+  --surface-hi: #272727;
+  --border: rgba(255, 255, 255, 0.12);
+  --ink: #f1f1f1;
+  --muted: #aaaaaa;
+  --red: #ff0033;
+}
+html, body {
+  width: 100%; height: 100%; overflow-y: auto;
+  background: var(--bg); color: var(--ink);
+  font: 14px/1.45 "Roboto", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.yt-bar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 20px; background: rgba(15, 15, 15, 0.96); border-bottom: 1px solid var(--border);
+}
+.yt-brand { display: flex; align-items: center; gap: 8px; }
+.yt-logo {
+  display: grid; place-items: center; width: 30px; height: 22px; border-radius: 6px;
+  background: var(--red); color: #fff; font-size: 11px; line-height: 1;
+}
+.yt-wordmark { font-size: 18px; font-weight: 800; letter-spacing: -0.03em; }
+
+.yt-search { display: flex; flex: 1; max-width: 560px; min-width: 220px; }
+.yt-search input {
+  flex: 1; min-width: 0; padding: 9px 15px; border: 1px solid #303030; border-right: 0;
+  border-radius: 999px 0 0 999px; background: #121212; color: var(--ink); font: inherit; outline: none;
+}
+.yt-search input:focus { border-color: #1c62b9; }
+.yt-search button {
+  padding: 9px 18px; border: 1px solid #303030; border-radius: 0 999px 999px 0;
+  background: #222222; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer;
+}
+.yt-search button:hover { background: #303030; }
+
+.yt-actions { display: flex; align-items: center; gap: 8px; }
+.yt-pill {
+  padding: 8px 14px; border: 0; border-radius: 999px;
+  background: #f1f1f1; color: #0f0f0f; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.yt-pill:hover { background: #d9d9d9; }
+.yt-pill.subtle { background: #272727; color: var(--ink); }
+.yt-pill.subtle:hover { background: #3f3f3f; }
+
+.yt-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px;
+  max-width: 1400px; margin: 0 auto; padding: 20px;
+}
+.yt-stage { display: grid; gap: 12px; align-content: start; }
+.yt-player-wrap {
+  width: 100%; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden;
+  background: #000; border: 1px solid var(--border);
+}
+#ytPlayer { width: 100%; height: 100%; border: 0; display: block; }
+.yt-meta { display: grid; gap: 4px; }
+#ytTitle { font-size: 19px; font-weight: 700; }
+.yt-hint { color: var(--muted); font-size: 13px; }
+
+.yt-sidebar {
+  display: grid; gap: 12px; align-content: start;
+  padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface);
+}
+.yt-side-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.yt-side-head h2 { font-size: 15px; font-weight: 700; }
+.yt-clear {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px;
+  background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer;
+}
+.yt-clear:hover { color: var(--ink); background: var(--surface-hi); }
+
+.yt-list { list-style: none; display: grid; gap: 8px; }
+.yt-item {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px;
+  border: 1px solid transparent; border-radius: 10px; background: rgba(255, 255, 255, 0.03);
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.yt-item:hover { background: var(--surface-hi); }
+.yt-item.is-active { border-color: rgba(255, 255, 255, 0.25); background: rgba(255, 255, 255, 0.09); }
+.yt-thumb {
+  width: 96px; aspect-ratio: 16 / 9; border-radius: 7px; object-fit: cover; flex: none; background: #222;
+}
+.yt-item-info { min-width: 0; display: grid; gap: 2px; }
+.yt-item-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yt-item-sub { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 920px) {
+  .yt-layout { grid-template-columns: 1fr; }
+}

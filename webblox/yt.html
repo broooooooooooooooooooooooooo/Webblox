@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>YouTube</title>
+  <link rel="stylesheet" href="yt.css">
+</head>
+<body>
+  <header class="yt-bar">
+    <div class="yt-brand">
+      <span class="yt-logo" aria-hidden="true">▶</span>
+      <span class="yt-wordmark">YouTube</span>
+    </div>
+    <form class="yt-search" id="ytForm" role="search">
+      <input id="ytInput" type="search" placeholder="Pega un enlace / ID de video de YouTube o busca…" aria-label="Enlace o búsqueda de YouTube" autocomplete="off" spellcheck="false">
+      <button type="submit" aria-label="Cargar video">Buscar</button>
+    </form>
+    <div class="yt-actions">
+      <button type="button" id="ytSaveBtn" class="yt-pill">Guardar</button>
+      <button type="button" id="ytBackBtn" class="yt-pill subtle" title="Volver (Ctrl + Alt + Y)">Volver (Ctrl+Alt+Y)</button>
+    </div>
+  </header>
+
+  <main class="yt-layout">
+    <section class="yt-stage">
+      <div class="yt-player-wrap">
+        <iframe
+          id="ytPlayer"
+          title="Reproductor de YouTube"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+          allowfullscreen>
+        </iframe>
+      </div>
+      <div class="yt-meta">
+        <h1 id="ytTitle">lofi hip hop radio 📚 beats to relax/study to</h1>
+        <p id="ytHint" class="yt-hint">Tus videos guardados e historial se mantienen guardados automáticamente en este navegador.</p>
+      </div>
+    </section>
+
+    <aside class="yt-sidebar">
+      <div class="yt-side-head">
+        <h2>Guardados y Recientes</h2>
+        <button type="button" id="ytClearBtn" class="yt-clear">Limpiar</button>
+      </div>
+      <ul id="ytList" class="yt-list"></ul>
+    </aside>
+  </main>
+
+  <script type="module" src="yt.js"></script>
+</body>
+</html>

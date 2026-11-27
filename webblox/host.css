@@ -57,6 +57,12 @@ html, body {
 #fps-hud[data-tier="mid"]::before { background: var(--warn); }
 #fps-hud[data-tier="low"]::before { background: var(--bad); }
 
+#expectedFrame {
+  position: fixed; inset: 0; width: 100vw; height: 100vh; border: 0;
+  z-index: 9999; background: #0f0f0f;
+}
+#expectedFrame[hidden] { display: none; }
+
 #canvas { display: block; width: 100vw; height: 100vh; background: #000; outline: none; touch-action: none; }
 #canvas.tab-lock-contended { filter: blur(4px); }
 

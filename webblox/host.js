@@ -412,7 +412,7 @@ async function robloxPostWithCsrf(url, payload) {
   try {
     json = JSON.parse(new TextDecoder().decode(result.body));
   } catch {}
-  return { status: result.status, json };
+  return { status: result.status, headers: result.headers, json };
 }
 
 // A Scramjet 2 browser on this origin (its controller) keeps its cookie jar in
@@ -470,6 +470,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
   return new Promise((resolve) => {
     let pollTimer = 0;
     let closed = false;
+    let twoStep = null; // { userId, ticket, mediaType }
     const stopPolling = () => {
       if (pollTimer) clearTimeout(pollTimer);
       pollTimer = 0;
@@ -480,34 +481,69 @@ function askForSession(expired, { allowCancel = false } = {}) {
     shade.innerHTML = `
       <form novalidate aria-labelledby="session-title">
         <h1 id="session-title"></h1>
-        <p>Usa <b>Inicio rápido</b> (aprueba el código en roblox.com/crossdevicelogin/ConfirmCode desde tu móvil o navegador) o pega tu cookie <code>.ROBLOSECURITY</code>.</p>
-        <div class="quick-code" hidden></div>
-        <p class="quick-status" hidden></p>
-        <div class="actions">
-          <button type="button" class="quick-btn">Generar código rápido</button>
-          <button type="button" class="secondary proxy-btn">Leer del proxy</button>
+        <div class="session-tabs" role="tablist">
+          <button type="button" class="session-tab is-active" data-mode="password">Usuario</button>
+          <button type="button" class="session-tab" data-mode="quick">Código rápido</button>
+          <button type="button" class="session-tab" data-mode="cookie">Cookie</button>
         </div>
-        <div class="session-divider">o pega la cookie</div>
-        <input type="password" autocomplete="off" spellcheck="false" placeholder="_|WARNING:-DO-NOT-SHARE-THIS.--|..." aria-label="Cookie .ROBLOSECURITY" />
+
+        <div class="session-pane" data-pane="password">
+          <p>Inicia sesión con tu nombre de usuario (o correo) y contraseña de Roblox.</p>
+          <input type="text" class="user-input" autocomplete="username" spellcheck="false" placeholder="Nombre de usuario o correo" aria-label="Nombre de usuario o correo" />
+          <input type="password" class="pass-input" autocomplete="current-password" placeholder="Contraseña" aria-label="Contraseña" />
+          <div class="twofa-box" hidden>
+            <p class="twofa-hint">Introduce el código de verificación en 2 pasos (2FA):</p>
+            <input type="text" class="twofa-input" inputmode="numeric" autocomplete="one-time-code" placeholder="Código de 6 dígitos" aria-label="Código 2FA" />
+          </div>
+          <div class="actions">
+            <button type="button" class="secondary cancel-btn"></button>
+            <button type="submit" class="pass-submit">Iniciar sesión</button>
+          </div>
+        </div>
+
+        <div class="session-pane" data-pane="quick" hidden>
+          <p>Genera un código y apruébalo en <b>roblox.com/crossdevicelogin/ConfirmCode</b> desde tu móvil o navegador.</p>
+          <div class="quick-code" hidden></div>
+          <p class="quick-status" hidden></p>
+          <div class="actions">
+            <button type="button" class="secondary cancel-btn-quick"></button>
+            <button type="button" class="quick-btn">Generar código rápido</button>
+          </div>
+        </div>
+
+        <div class="session-pane" data-pane="cookie" hidden>
+          <p>Pega tu cookie <code>.ROBLOSECURITY</code> o léela desde el proxy Scramjet.</p>
+          <input type="password" class="cookie-input" autocomplete="off" spellcheck="false" placeholder="_|WARNING:-DO-NOT-SHARE-THIS.--|..." aria-label="Cookie .ROBLOSECURITY" />
+          <div class="actions">
+            <button type="button" class="secondary cancel-btn-cookie"></button>
+            <button type="button" class="secondary proxy-btn">Leer del proxy</button>
+            <button type="button" class="cookie-submit">Entrar con cookie</button>
+          </div>
+        </div>
+
         <p class="error" id="session-error" role="alert"></p>
-        <div class="actions">
-          <button type="button" class="secondary cancel-btn"></button>
-          <button type="submit">Entrar con cookie</button>
-        </div>
       </form>`;
 
     const form = shade.querySelector("form");
     const error = form.querySelector(".error");
+    const tabs = [...form.querySelectorAll(".session-tab")];
+    const panes = [...form.querySelectorAll(".session-pane")];
+    const userInput = form.querySelector(".user-input");
+    const passInput = form.querySelector(".pass-input");
+    const twofaBox = form.querySelector(".twofa-box");
+    const twofaHint = form.querySelector(".twofa-hint");
+    const twofaInput = form.querySelector(".twofa-input");
+    const passSubmit = form.querySelector(".pass-submit");
     const quickCode = form.querySelector(".quick-code");
     const quickStatus = form.querySelector(".quick-status");
     const quickBtn = form.querySelector(".quick-btn");
     const proxyBtn = form.querySelector(".proxy-btn");
-    const cancelBtn = form.querySelector(".cancel-btn");
-    const cookieInput = form.querySelector("input");
-    const submitBtn = form.querySelector('button[type="submit"]');
+    const cookieInput = form.querySelector(".cookie-input");
+    const cookieSubmit = form.querySelector(".cookie-submit");
+    const cancelBtns = [...form.querySelectorAll(".cancel-btn, .cancel-btn-quick, .cancel-btn-cookie")];
 
     form.querySelector("h1").textContent = expired ? "La sesión de Roblox caducó" : "Inicia sesión en Roblox";
-    cancelBtn.textContent = allowCancel ? "Cerrar" : "Volver";
+    for (const btn of cancelBtns) btn.textContent = allowCancel ? "Cerrar" : "Volver";
 
     const fail = (text) => {
       error.textContent = text;
@@ -519,9 +555,102 @@ function askForSession(expired, { allowCancel = false } = {}) {
       resolve(ok);
     };
 
-    cancelBtn.addEventListener("click", () => {
-      if (allowCancel) finish(false);
-      else location.assign(ROOT.href);
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => {
+        error.textContent = "";
+        const mode = tab.dataset.mode;
+        for (const t of tabs) t.classList.toggle("is-active", t === tab);
+        for (const p of panes) p.hidden = p.dataset.pane !== mode;
+      });
+    }
+
+    for (const btn of cancelBtns) {
+      btn.addEventListener("click", () => {
+        if (allowCancel) finish(false);
+        else location.assign(ROOT.href);
+      });
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      error.textContent = "";
+
+      if (twoStep) {
+        const code = twofaInput.value.trim();
+        if (!code) return fail("Introduce el código 2FA.");
+        passSubmit.disabled = true;
+        try {
+          const media = String(twoStep.mediaType || "Email").toLowerCase();
+          const verify = await robloxPostWithCsrf(
+            `https://twostepverification.roblox.com/v1/users/${twoStep.userId}/challenges/${media}/verify`,
+            { challengeId: twoStep.ticket, actionType: "Login", code },
+          );
+          const token = verify.json?.verificationToken;
+          if (verify.status !== 200 || !token) {
+            const msg = verify.json?.errors?.[0]?.message || `Código 2FA inválido (HTTP ${verify.status}).`;
+            throw new Error(msg);
+          }
+          const complete = await robloxPostWithCsrf("https://auth.roblox.com/v2/twostepverification/login", {
+            challengeId: twoStep.ticket,
+            verificationToken: token,
+            rememberDevice: true,
+          });
+          if (complete.status === 200 && (await sessionAccepted())) {
+            finish(true);
+            return;
+          }
+          throw new Error(complete.json?.errors?.[0]?.message || `No se pudo completar el 2FA (HTTP ${complete.status}).`);
+        } catch (err) {
+          fail(err.message || String(err));
+        } finally {
+          passSubmit.disabled = false;
+        }
+        return;
+      }
+
+      const username = userInput.value.trim();
+      const password = passInput.value;
+      if (!username || !password) return fail("Escribe tu usuario y contraseña.");
+      passSubmit.disabled = true;
+      try {
+        const ctype = username.includes("@") ? "Email" : "Username";
+        const res = await robloxPostWithCsrf("https://auth.roblox.com/v2/login", {
+          ctype,
+          cvalue: username,
+          password,
+        });
+        if (res.status === 200 && res.json?.twoStepVerificationData?.ticket && res.json?.user?.id) {
+          twoStep = {
+            userId: res.json.user.id,
+            ticket: res.json.twoStepVerificationData.ticket,
+            mediaType: res.json.twoStepVerificationData.mediaType || "Email",
+          };
+          twofaHint.textContent = `Introduce el código de verificación (${twoStep.mediaType}) enviado a tu cuenta:`;
+          twofaBox.hidden = false;
+          twofaInput.focus();
+          passSubmit.textContent = "Verificar 2FA";
+          passSubmit.disabled = false;
+          return;
+        }
+        if (res.status === 200 && (await sessionAccepted())) {
+          finish(true);
+          return;
+        }
+        const challengeType = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-type")?.[1]?.toLowerCase() || "";
+        const apiMsg = res.json?.errors?.[0]?.message || "";
+        if (challengeType.includes("captcha") || /captcha|challenge/i.test(apiMsg)) {
+          throw new Error("Roblox pidió CAPTCHA para este inicio de sesión. Usa la pestaña 'Código rápido' o 'Cookie'.");
+        }
+        if (/incorrect|invalid/i.test(apiMsg)) {
+          throw new Error("Usuario o contraseña incorrectos.");
+        }
+        throw new Error(apiMsg || `Roblox rechazó el inicio de sesión (HTTP ${res.status}).`);
+      } catch (err) {
+        forgetSession();
+        fail(err.message || String(err));
+      } finally {
+        passSubmit.disabled = false;
+      }
     });
 
     quickBtn.addEventListener("click", async () => {
@@ -601,12 +730,11 @@ function askForSession(expired, { allowCancel = false } = {}) {
       proxyBtn.disabled = false;
     });
 
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
+    cookieSubmit.addEventListener("click", async () => {
       error.textContent = "";
       const raw = cookieInput.value.trim().replace(/^\.ROBLOSECURITY=/i, "");
-      if (!raw) return fail("Pega tu cookie .ROBLOSECURITY o usa Quick Login.");
-      submitBtn.disabled = true;
+      if (!raw) return fail("Pega tu cookie .ROBLOSECURITY.");
+      cookieSubmit.disabled = true;
       try {
         if (await trySession(raw)) {
           finish(true);
@@ -617,11 +745,11 @@ function askForSession(expired, { allowCancel = false } = {}) {
         forgetSession();
         fail(`No se pudo conectar con Roblox: ${err.message || err}`);
       }
-      submitBtn.disabled = false;
+      cookieSubmit.disabled = false;
     });
 
     document.body.append(shade);
-    quickBtn.focus();
+    userInput.focus();
   });
 }
 

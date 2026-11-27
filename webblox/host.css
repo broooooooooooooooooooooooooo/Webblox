@@ -158,6 +158,20 @@ html, body {
   font: 700 26px/1.2 ui-monospace, monospace; letter-spacing: 0.14em; color: #fff;
 }
 .session-divider { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+.session-tabs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 4px;
+  border: 1px solid var(--glass-border); border-radius: 12px; background: rgba(255, 255, 255, 0.04);
+}
+.session .session-tab {
+  padding: 7px 8px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.session .session-tab:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.session .session-tab.is-active { background: var(--accent); color: #fff; }
+.session-pane { display: grid; gap: 10px; }
+.session-pane[hidden] { display: none; }
+.twofa-box { display: grid; gap: 8px; padding-top: 4px; }
+.twofa-box[hidden] { display: none; }
 .session-divider::before, .session-divider::after { content: ""; flex: 1; height: 1px; background: var(--glass-border); }
 
 /* Modern Roblox Launcher */

@@ -501,8 +501,8 @@ function askForSession(expired, { allowCancel = false } = {}) {
             <p class="captcha-hint">Completa el CAPTCHA para continuar:</p>
             <iframe class="captcha-frame" title="Verificación CAPTCHA de Roblox" hidden></iframe>
             <div class="actions">
-              <button type="button" class="secondary captcha-popup-btn">Abrir en ventana</button>
-              <button type="button" class="secondary captcha-quick-btn">Usar Código rápido</button>
+              <button type="button" class="secondary captcha-popup-btn" hidden>Abrir en ventana</button>
+              <button type="button" class="captcha-quick-btn">Entrar con Código rápido</button>
             </div>
           </div>
           <div class="actions">
@@ -650,6 +650,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
         captchaFrame.setAttribute("credentialless", "");
         captchaFrame.src = url;
         captchaFrame.hidden = false;
+        captchaPopupBtn.hidden = false;
         captchaBox.hidden = false;
         clearCaptchaTimer();
         captchaReadyTimer = setTimeout(() => {
@@ -660,11 +661,13 @@ function askForSession(expired, { allowCancel = false } = {}) {
         return false;
       }
 
-      if (challengeType.includes("captcha") || /captcha|challenge/i.test(apiMsg)) {
+      if (challengeType || /captcha|challenge/i.test(apiMsg)) {
         captchaFrame.hidden = true;
+        captchaPopupBtn.hidden = true;
         captchaBox.hidden = false;
-        captchaHint.textContent = "Roblox pidió verificación. Usa «Usar Código rápido» para entrar sin CAPTCHA.";
-        throw new Error("Roblox pidió verificación CAPTCHA.");
+        const kind = challengeType || "verificación web";
+        captchaHint.textContent = `Roblox bloqueó el acceso directo con contraseña (desafío «${kind}» que solo funciona dentro de roblox.com). Pulsa «Entrar con Código rápido» para aprobar tu sesión desde Chrome.`;
+        throw new Error(`Roblox requiere verificación (${kind}) que no puede hacerse fuera de roblox.com.`);
       }
       if (/incorrect|invalid/i.test(apiMsg)) {
         throw new Error("Usuario o contraseña incorrectos.");

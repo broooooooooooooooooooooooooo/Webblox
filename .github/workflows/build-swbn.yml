@@ -39,7 +39,7 @@ jobs:
         env:
           IWA_SIGNING_KEY: ${{ secrets.IWA_SIGNING_KEY }}
           SWBN_VERSION: "1.0.${{ github.run_number }}"
-          IWA_UPDATE_MANIFEST_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/swbn/update-manifest.json"
+          IWA_UPDATE_MANIFEST_URL: "https://github.com/${{ github.repository }}/releases/latest/download/update-manifest.json"
         run: bun run build:swbn
 
       - name: Upload webblox.swbn artifact

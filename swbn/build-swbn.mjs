@@ -223,7 +223,7 @@ async function main() {
 
   const updateManifestUrl =
     process.env.IWA_UPDATE_MANIFEST_URL ||
-    "https://raw.githubusercontent.com/broooooooooooooooooooooooooo/Webblox/main/swbn/update-manifest.json";
+    "https://github.com/broooooooooooooooooooooooooo/Webblox/releases/latest/download/update-manifest.json";
 
   const manifest = {
     name: "Webblox",

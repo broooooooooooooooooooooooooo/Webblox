@@ -3,7 +3,7 @@
 > **Descargar `webblox.swbn` (~228 MB, listo para instalar):**
 >
 > - **[Descargar última versión (`webblox.swbn`)](https://github.com/broooooooooooooooooooooooooo/Webblox/releases/latest/download/webblox.swbn)**
-> - **[Manifiesto de actualización automática (`update-manifest.json`)](https://raw.githubusercontent.com/broooooooooooooooooooooooooo/Webblox/main/swbn/update-manifest.json)**
+> - **[Manifiesto de actualización automática (`update-manifest.json`)](https://github.com/broooooooooooooooooooooooooo/Webblox/releases/latest/download/update-manifest.json)**
 > - **[Todas las releases](https://github.com/broooooooooooooooooooooooooo/Webblox/releases)**
 
 *(Nota: GitHub prohíbe subir archivos mayores de 100 MB dentro de carpetas de Git —`webblox.swbn` pesa ~228 MB porque lleva el motor completo de Roblox dentro—, por eso el archivo compilado se entrega desde **Releases** mediante el enlace directo de arriba).*
@@ -28,7 +28,7 @@
 
 ## Actualizaciones automáticas (`update-manifest.json`)
 
-- El paquete `.swbn` incluye `"update_manifest_url": "https://raw.githubusercontent.com/broooooooooooooooooooooooooo/Webblox/main/swbn/update-manifest.json"` dentro de `/.well-known/manifest.webmanifest` y se firma siempre con la misma clave Ed25519 (`isolated-app://pg6isjl4i3jyh4z5xkxqmcdfwecxprqqt7ot5aklf63x43aibeqqaaic`).
+- El paquete `.swbn` incluye `"update_manifest_url": "https://github.com/broooooooooooooooooooooooooo/Webblox/releases/latest/download/update-manifest.json"` dentro de `/.well-known/manifest.webmanifest` y se firma siempre con la misma clave Ed25519 (`isolated-app://pg6isjl4i3jyh4z5xkxqmcdfwecxprqqt7ot5aklf63x43aibeqqaaic`).
 - Cada vez que se publica una nueva release en GitHub Actions, `swbn/update-manifest.json` se actualiza automáticamente con la nueva versión y su enlace `.swbn`.
 - Chrome comprueba actualizaciones automáticamente en segundo plano cada 4–6 horas (y también puedes forzar la búsqueda en `chrome://web-app-internals/`).
 

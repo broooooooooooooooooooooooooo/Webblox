@@ -7,10 +7,18 @@ const EpoxyTransport = window.EpoxyTransport.default;
 const iframe = document.getElementById("browserFrame");
 const input = document.getElementById("urlInput");
 const status = document.getElementById("status");
+const PUBLIC_WISP = "wss://wisp.mercurywork.shop/";
 const direct = hasDirectSockets();
-if (direct) installDirectWisp();
-const wisp = direct ? new URL(DIRECT_WISP_URL) : new URL("/wisp/", location.href);
-if (!direct) wisp.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+const isIwa = location.protocol === "isolated-app:";
+const paramWisp = new URLSearchParams(location.search).get("wisp");
+const wisp = new URL(
+  paramWisp && /^wss?:\/\//i.test(paramWisp)
+    ? paramWisp
+    : isIwa
+      ? PUBLIC_WISP
+      : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/wisp/`,
+);
+if (wisp.href === DIRECT_WISP_URL && direct) installDirectWisp();
 let frame;
 const parked = document.getElementById("parked");
 
@@ -78,14 +86,15 @@ async function start() {
     const serviceworker = navigator.serviceWorker.controller ?? registration.active;
     if (!serviceworker) throw new Error("No se pudo iniciar el service worker.");
 
-    const transport = new EpoxyTransport({ wisp: wisp.href, ...(direct ? { wisp_v2: false } : {}) });
+    const useDirect = wisp.href === DIRECT_WISP_URL && direct;
+    const transport = new EpoxyTransport({ wisp: wisp.href, ...(useDirect ? { wisp_v2: false } : {}) });
     await transport.init();
 
     const controller = new Controller({ serviceworker, transport, scramjetConfig: defaultConfig });
     await controller.wait();
 
     const launchPlugin = createBloxLaunchPlugin(ManagedPlugin, {
-      url: (launch) => bloxUrl("/blox/", launch, wisp.href),
+      url: (launch) => bloxUrl("/blox/", launch, direct ? DIRECT_WISP_URL : wisp.href),
       open: openGameWindow,
       notify: setStatus,
     });

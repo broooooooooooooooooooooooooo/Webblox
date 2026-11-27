@@ -76,9 +76,10 @@ function wispUrl() {
     url.searchParams.delete("wisp");
     history.replaceState(history.state, "", url);
   }
-  if (hasDirectSockets() && (!given || given === DIRECT_WISP_URL)) return DIRECT_WISP_URL;
   const stored = localStorage.getItem(WISP_KEY);
-  if (stored && /^wss?:\/\//i.test(stored)) return stored;
+  if (stored === DIRECT_WISP_URL && hasDirectSockets()) return DIRECT_WISP_URL;
+  if (stored && stored !== DIRECT_WISP_URL && /^wss?:\/\//i.test(stored)) return stored;
+  if (hasDirectSockets() && (!given || given === DIRECT_WISP_URL)) return DIRECT_WISP_URL;
   return `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/wisp/`;
 }
 
@@ -1371,6 +1372,16 @@ function showLauncher() {
           <h2 id="downloader-title">Motor y Almacenamiento</h2>
           <button type="button" class="ghost-btn settings-reset">Restablecer configuración</button>
         </div>
+        <div class="setting-row">
+          <div class="setting-meta">
+            <span class="setting-title">Red de conexión (Wisp)</span>
+            <span class="setting-desc">Direct Sockets conecta sin servidor; Wisp público usa wss://wisp.mercurywork.shop/.</span>
+          </div>
+          <fieldset class="renderer-switch">
+            <label><input type="radio" name="wispMode" value="direct"> Direct Sockets</label>
+            <label><input type="radio" name="wispMode" value="public"> Wisp público</label>
+          </fieldset>
+        </div>
         <p class="downloader-text">Comprobando…</p>
         <progress class="downloader-bar" max="1" value="0" hidden></progress>
         <button type="button" class="downloader-button" hidden>Descargar</button>
@@ -1547,6 +1558,17 @@ function showLauncher() {
     radio.addEventListener("change", () => saveFpsCap(radio.value));
   }
 
+  const wispMode = WISP === DIRECT_WISP_URL ? "direct" : "public";
+  for (const radio of launcher.querySelectorAll('input[name="wispMode"]')) {
+    radio.checked = radio.value === wispMode;
+    radio.addEventListener("change", () => {
+      try {
+        localStorage.setItem(WISP_KEY, radio.value === "public" ? "wss://wisp.mercurywork.shop/" : DIRECT_WISP_URL);
+      } catch {}
+      location.reload();
+    });
+  }
+
   const fpsToggle = launcher.querySelector("#toggleFps");
   fpsToggle.checked = savedShowFps();
   fpsToggle.addEventListener("change", () => saveBool(SHOW_FPS_KEY, fpsToggle.checked));
@@ -1568,7 +1590,7 @@ function showLauncher() {
   wakeToggle.addEventListener("change", () => saveBool(WAKE_LOCK_KEY, wakeToggle.checked));
 
   launcher.querySelector(".settings-reset").addEventListener("click", () => {
-    for (const key of [THEME_KEY, RENDERER_KEY, SCALE_KEY, FPS_CAP_KEY, SHOW_FPS_KEY, PERF_MODE_KEY, ULTRA_FPS_KEY, MUTE_AUDIO_KEY, WAKE_LOCK_KEY]) {
+    for (const key of [THEME_KEY, RENDERER_KEY, SCALE_KEY, FPS_CAP_KEY, WISP_KEY, SHOW_FPS_KEY, PERF_MODE_KEY, ULTRA_FPS_KEY, MUTE_AUDIO_KEY, WAKE_LOCK_KEY]) {
       try { localStorage.removeItem(key); } catch {}
     }
     location.reload();

@@ -2351,18 +2351,89 @@ function unlockGameAudio() {
 
   const muted = savedMuteAudio();
   const contexts = new Set();
+  const origResume = NativeAudioContext.prototype.resume;
+  const origSuspend = NativeAudioContext.prototype.suspend;
+
   const syncAll = () => {
     for (const ctx of contexts) {
       if (ctx.state === "closed") {
         contexts.delete(ctx);
       } else if (muted || expectedAudioSuspended) {
-        if (ctx.state === "running") ctx.suspend().catch(() => {});
+        if (ctx.state === "running") origSuspend.call(ctx).catch(() => {});
       } else if (ctx.state === "suspended") {
-        ctx.resume().catch(() => {});
+        origResume.call(ctx).catch(() => {});
       }
     }
   };
   expectedAudioHook = syncAll;
+
+  // On isolated-app:// IWAs, Chrome can leave AudioContext.resume() pending even
+  // when ctx.state === "running", which stalls Roblox WebClient.js before it calls
+  // audioWorklet.addModule(). Resolve immediately once running (and avoid resuming
+  // while intentionally muted/suspended so addModule still initializes cleanly).
+  if (typeof origResume === "function" && !origResume.__bloxAudio) {
+    const wrappedResume = function (...args) {
+      if (muted || expectedAudioSuspended) return Promise.resolve();
+      const nativePromise = origResume.apply(this, args);
+      if (this.state === "running" || this.state === "closed") {
+        Promise.resolve(nativePromise).catch(() => {});
+        return Promise.resolve();
+      }
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        let poll = null;
+        const cleanup = () => {
+          if (poll) {
+            clearInterval(poll);
+            poll = null;
+          }
+          this.removeEventListener?.("statechange", checkState);
+        };
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve();
+        };
+        const checkState = () => {
+          if (this.state === "running" || this.state === "closed") finish();
+        };
+        poll = setInterval(checkState, 50);
+        this.addEventListener?.("statechange", checkState);
+        Promise.resolve(nativePromise).then(finish, (error) => {
+          if (settled) return;
+          if (this.state === "running") finish();
+          else {
+            settled = true;
+            cleanup();
+            reject(error);
+          }
+        });
+      });
+    };
+    wrappedResume.__bloxAudio = true;
+    try {
+      NativeAudioContext.prototype.resume = wrappedResume;
+    } catch {}
+  }
+
+  const workletProto = globalThis.AudioWorklet?.prototype;
+  if (workletProto?.addModule && !workletProto.addModule.__bloxAudio) {
+    const origAddModule = workletProto.addModule;
+    const wrappedAddModule = function (moduleURL, options) {
+      let target = moduleURL;
+      if (typeof moduleURL === "string" && window.trustedTypes?.defaultPolicy?.createScriptURL) {
+        try {
+          target = window.trustedTypes.defaultPolicy.createScriptURL(moduleURL);
+        } catch {}
+      }
+      return origAddModule.call(this, target, options);
+    };
+    wrappedAddModule.__bloxAudio = true;
+    try {
+      workletProto.addModule = wrappedAddModule;
+    } catch {}
+  }
 
   function WrappedAudioContext(...args) {
     const ctx = new NativeAudioContext(...args);
@@ -2371,9 +2442,9 @@ function unlockGameAudio() {
       if (ctx.state === "closed") contexts.delete(ctx);
     });
     if (muted || expectedAudioSuspended) {
-      if (ctx.state === "running") ctx.suspend().catch(() => {});
+      if (ctx.state === "running") origSuspend.call(ctx).catch(() => {});
     } else if (ctx.state === "suspended") {
-      ctx.resume().catch(() => {});
+      origResume.call(ctx).catch(() => {});
     }
     return ctx;
   }
@@ -2387,9 +2458,13 @@ function unlockGameAudio() {
   } catch {}
 
   if (!muted) {
-    for (const eventName of ["pointerdown", "mousedown", "keydown", "touchstart", "click"]) {
+    for (const eventName of ["pointerdown", "pointerup", "mousedown", "keydown", "keyup", "touchstart", "click"]) {
       window.addEventListener(eventName, syncAll, { capture: true, passive: true });
     }
+    window.addEventListener("focus", syncAll, { passive: true });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") syncAll();
+    });
   }
 }
 
@@ -2401,6 +2476,8 @@ function setupExpectedFrame() {
   const frame = document.getElementById("expectedFrame");
   if (!frame) return;
 
+  const isGamePage = /^[1-9]\d{0,18}$/.test(new URLSearchParams(location.search).get("placeId") || "");
+
   const apply = (open) => {
     const next = Boolean(open);
     if (next && !frame.getAttribute("src")) {
@@ -2409,9 +2486,11 @@ function setupExpectedFrame() {
     frame.hidden = !next;
     expectedAudioSuspended = next;
     expectedAudioHook?.();
-    try {
-      localStorage.setItem(EXPECTED_OPEN_KEY, next ? "1" : "0");
-    } catch {}
+    if (!isGamePage) {
+      try {
+        localStorage.setItem(EXPECTED_OPEN_KEY, next ? "1" : "0");
+      } catch {}
+    }
     if (next) {
       if (document.pointerLockElement) {
         try { document.exitPointerLock(); } catch {}
@@ -2443,7 +2522,7 @@ function setupExpectedFrame() {
     }
   });
 
-  if (savedBool(EXPECTED_OPEN_KEY, false)) {
+  if (!isGamePage && savedBool(EXPECTED_OPEN_KEY, false)) {
     apply(true);
   }
 }

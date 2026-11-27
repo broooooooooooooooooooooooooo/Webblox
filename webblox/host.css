@@ -177,6 +177,18 @@ html, body {
   border-radius: 12px; background: rgba(255, 255, 255, 0.05);
 }
 .captcha-box[hidden] { display: none; }
+.captcha-frame {
+  width: 100%; height: 360px; border: 1px solid var(--glass-border);
+  border-radius: 10px; background: #0e1322;
+}
+.captcha-frame[hidden] { display: none; }
+.quick-link {
+  display: inline-block; text-align: center; padding: 8px 12px; border-radius: 10px;
+  border: 1px solid var(--glass-border); background: rgba(255, 255, 255, 0.08);
+  color: var(--accent-hi); font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.quick-link:hover { background: rgba(255, 255, 255, 0.14); }
+.quick-link[hidden] { display: none; }
 .session-divider::before, .session-divider::after { content: ""; flex: 1; height: 1px; background: var(--glass-border); }
 
 /* Modern Roblox Launcher */

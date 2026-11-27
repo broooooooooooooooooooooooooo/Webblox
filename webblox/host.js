@@ -393,11 +393,12 @@ async function sessionAccepted() {
   return (await currentUser()) !== null;
 }
 
-async function robloxPostWithCsrf(url, payload) {
+async function robloxPostWithCsrf(url, payload, extraHeaders = []) {
   const encoded = payload === undefined ? null : new TextEncoder().encode(JSON.stringify(payload)).buffer;
   const baseHeaders = [
     ["accept", "application/json"],
     ["content-type", "application/json"],
+    ...extraHeaders,
   ];
   let result = await upstream({ url, method: "POST", headers: baseHeaders, body: encoded ? encoded.slice(0) : null });
   const csrf = result.headers.find(([k]) => k.toLowerCase() === "x-csrf-token")?.[1];
@@ -497,8 +498,12 @@ function askForSession(expired, { allowCancel = false } = {}) {
             <input type="text" class="twofa-input" inputmode="numeric" autocomplete="one-time-code" placeholder="Código de 6 dígitos" aria-label="Código 2FA" />
           </div>
           <div class="captcha-box" hidden>
-            <p class="captcha-hint">Roblox requiere verificación CAPTCHA. Ábrelo en la ventana de Roblox, complétalo e inicia sesión allí; Webblox detectará tu sesión automáticamente.</p>
-            <button type="button" class="captcha-btn">Completar CAPTCHA en Roblox</button>
+            <p class="captcha-hint">Completa el CAPTCHA para continuar:</p>
+            <iframe class="captcha-frame" title="Verificación CAPTCHA de Roblox" hidden></iframe>
+            <div class="actions">
+              <button type="button" class="secondary captcha-popup-btn">Abrir en ventana</button>
+              <button type="button" class="secondary captcha-quick-btn">Usar Código rápido</button>
+            </div>
           </div>
           <div class="actions">
             <button type="button" class="secondary cancel-btn"></button>
@@ -510,6 +515,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
           <p>Genera un código y apruébalo en <b>roblox.com/crossdevicelogin/ConfirmCode</b> desde tu móvil o navegador.</p>
           <div class="quick-code" hidden></div>
           <p class="quick-status" hidden></p>
+          <a class="quick-link" href="https://www.roblox.com/crossdevicelogin/ConfirmCode" target="_blank" rel="noopener" hidden>Abrir ConfirmCode en Chrome ↗</a>
           <div class="actions">
             <button type="button" class="secondary cancel-btn-quick"></button>
             <button type="button" class="quick-btn">Generar código rápido</button>
@@ -529,6 +535,8 @@ function askForSession(expired, { allowCancel = false } = {}) {
         <p class="error" id="session-error" role="alert"></p>
       </form>`;
 
+    const CAPTCHA_PAGE = "https://broooooooooooooooooooooooooo.github.io/Webblox/captcha.html";
+    const CAPTCHA_ORIGIN = new URL(CAPTCHA_PAGE).origin;
     const form = shade.querySelector("form");
     const error = form.querySelector(".error");
     const tabs = [...form.querySelectorAll(".session-tab")];
@@ -540,10 +548,13 @@ function askForSession(expired, { allowCancel = false } = {}) {
     const twofaInput = form.querySelector(".twofa-input");
     const captchaBox = form.querySelector(".captcha-box");
     const captchaHint = form.querySelector(".captcha-hint");
-    const captchaBtn = form.querySelector(".captcha-btn");
+    const captchaFrame = form.querySelector(".captcha-frame");
+    const captchaPopupBtn = form.querySelector(".captcha-popup-btn");
+    const captchaQuickBtn = form.querySelector(".captcha-quick-btn");
     const passSubmit = form.querySelector(".pass-submit");
     const quickCode = form.querySelector(".quick-code");
     const quickStatus = form.querySelector(".quick-status");
+    const quickLink = form.querySelector(".quick-link");
     const quickBtn = form.querySelector(".quick-btn");
     const proxyBtn = form.querySelector(".proxy-btn");
     const cookieInput = form.querySelector(".cookie-input");
@@ -553,11 +564,18 @@ function askForSession(expired, { allowCancel = false } = {}) {
     form.querySelector("h1").textContent = expired ? "La sesión de Roblox caducó" : "Inicia sesión en Roblox";
     for (const btn of cancelBtns) btn.textContent = allowCancel ? "Cerrar" : "Volver";
 
-    let captchaPoll = 0;
     let captchaPopup = null;
-    const stopCaptchaPoll = () => {
-      if (captchaPoll) clearInterval(captchaPoll);
-      captchaPoll = 0;
+    let activeCaptcha = null; // { challengeId, unifiedCaptchaId, actionType, url, creds }
+
+    const decodeChallengeMeta = (raw) => {
+      if (!raw) return null;
+      try {
+        const b64 = String(raw).replace(/-/g, "+").replace(/_/g, "/");
+        const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+        return JSON.parse(atob(padded));
+      } catch {
+        return null;
+      }
     };
 
     const fail = (text) => {
@@ -566,52 +584,148 @@ function askForSession(expired, { allowCancel = false } = {}) {
     const finish = (ok = true) => {
       closed = true;
       stopPolling();
-      stopCaptchaPoll();
+      window.removeEventListener("message", onCaptchaMessage);
       try { captchaPopup?.close(); } catch {}
       shade.remove();
       resolve(ok);
     };
 
-    captchaBtn.addEventListener("click", () => {
+    const switchTab = (mode) => {
       error.textContent = "";
-      stopCaptchaPoll();
-      const w = Math.min(620, Math.round(screen.availWidth * 0.9));
-      const h = Math.min(760, Math.round(screen.availHeight * 0.9));
+      for (const t of tabs) t.classList.toggle("is-active", t.dataset.mode === mode);
+      for (const p of panes) p.hidden = p.dataset.pane !== mode;
+    };
+
+    const handleLoginResponse = async (res, creds) => {
+      if (res.status === 200 && res.json?.twoStepVerificationData?.ticket && res.json?.user?.id) {
+        twoStep = {
+          userId: res.json.user.id,
+          ticket: res.json.twoStepVerificationData.ticket,
+          mediaType: res.json.twoStepVerificationData.mediaType || "Email",
+        };
+        captchaBox.hidden = true;
+        captchaFrame.hidden = true;
+        captchaFrame.removeAttribute("src");
+        twofaHint.textContent = `Introduce el código de verificación (${twoStep.mediaType}) enviado a tu cuenta:`;
+        twofaBox.hidden = false;
+        twofaInput.focus();
+        passSubmit.textContent = "Verificar 2FA";
+        return true;
+      }
+      if (res.status === 200 && (await sessionAccepted())) {
+        finish(true);
+        return true;
+      }
+      const challengeId = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-id")?.[1] || "";
+      const challengeType = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-type")?.[1]?.toLowerCase() || "";
+      const rawMeta = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-metadata")?.[1] || "";
+      const meta = decodeChallengeMeta(rawMeta);
+      const apiMsg = res.json?.errors?.[0]?.message || "";
+
+      if (challengeType === "captcha" && challengeId && meta?.dataExchangeBlob) {
+        const hash = new URLSearchParams({
+          id: challengeId,
+          blob: meta.dataExchangeBlob,
+          pkey: "476068BF-9607-4799-B53D-966BE98E2B81",
+        }).toString();
+        const url = `${CAPTCHA_PAGE}#${hash}`;
+        activeCaptcha = {
+          challengeId,
+          unifiedCaptchaId: meta.unifiedCaptchaId || challengeId,
+          actionType: meta.actionType || "Login",
+          url,
+          creds,
+        };
+        captchaHint.textContent = "Resuelve el CAPTCHA aquí abajo para completar el inicio de sesión:";
+        captchaFrame.setAttribute("credentialless", "");
+        captchaFrame.src = url;
+        captchaFrame.hidden = false;
+        captchaBox.hidden = false;
+        return false;
+      }
+
+      if (challengeType.includes("captcha") || /captcha|challenge/i.test(apiMsg)) {
+        captchaFrame.hidden = true;
+        captchaBox.hidden = false;
+        captchaHint.textContent = "Roblox pidió verificación. Usa 'Código rápido' para entrar sin CAPTCHA.";
+        throw new Error("Roblox pidió verificación CAPTCHA.");
+      }
+      if (/incorrect|invalid/i.test(apiMsg)) {
+        throw new Error("Usuario o contraseña incorrectos.");
+      }
+      throw new Error(apiMsg || `Roblox rechazó el inicio de sesión (HTTP ${res.status}).`);
+    };
+
+    const onCaptchaMessage = async (event) => {
+      if (closed || event.origin !== CAPTCHA_ORIGIN) return;
+      const msg = event.data;
+      if (!msg || typeof msg !== "object" || !activeCaptcha) return;
+      if (msg.challengeId && msg.challengeId !== activeCaptcha.challengeId) return;
+
+      if (msg.type === "blox-captcha-error") {
+        captchaHint.textContent = `No se pudo cargar inline (${msg.error || "error"}). Prueba "Abrir en ventana" o "Usar Código rápido".`;
+        return;
+      }
+      if (msg.type !== "blox-captcha-token" || !msg.token) return;
+
+      const current = activeCaptcha;
+      activeCaptcha = null;
+      try { captchaPopup?.close(); } catch {}
+      captchaFrame.hidden = true;
+      captchaFrame.removeAttribute("src");
+      captchaHint.textContent = "CAPTCHA completado. Verificando con Roblox…";
+      passSubmit.disabled = true;
+      error.textContent = "";
+      try {
+        const metaJson = JSON.stringify({
+          unifiedCaptchaId: current.unifiedCaptchaId,
+          captchaToken: msg.token,
+          actionType: current.actionType,
+        });
+        const cont = await robloxPostWithCsrf("https://apis.roblox.com/challenge/v1/continue", {
+          challengeId: current.challengeId,
+          challengeType: "captcha",
+          challengeMetadata: metaJson,
+        });
+        if (cont.status !== 200) {
+          throw new Error(cont.json?.errors?.[0]?.message || `Roblox rechazó el CAPTCHA (HTTP ${cont.status}).`);
+        }
+        const retry = await robloxPostWithCsrf("https://auth.roblox.com/v2/login", current.creds, [
+          ["rblx-challenge-id", current.challengeId],
+          ["rblx-challenge-type", "captcha"],
+          ["rblx-challenge-metadata", btoa(metaJson)],
+        ]);
+        await handleLoginResponse(retry, current.creds);
+      } catch (err) {
+        forgetSession();
+        fail(err.message || String(err));
+      } finally {
+        passSubmit.disabled = false;
+      }
+    };
+    window.addEventListener("message", onCaptchaMessage);
+
+    captchaPopupBtn.addEventListener("click", () => {
+      if (!activeCaptcha?.url) return;
+      const w = 420;
+      const h = 540;
       const left = Math.round((screen.availWidth - w) / 2);
       const top = Math.round((screen.availHeight - h) / 2);
       captchaPopup = window.open(
-        new URL("/", ROOT).href,
-        "blox-captcha-login",
+        activeCaptcha.url,
+        "blox-arkose-captcha",
         `popup=yes,width=${w},height=${h},left=${left},top=${top}`,
       );
-      if (!captchaPopup) {
-        return fail("El navegador bloqueó la ventana emergente. Permite popups o abre '/' manualmente.");
-      }
-      captchaHint.textContent = "Ventana abierta. Completa el CAPTCHA y entra en Roblox; detectaremos tu sesión automáticamente…";
-      captchaPoll = setInterval(async () => {
-        if (closed) return stopCaptchaPoll();
-        try {
-          const value = await proxySession();
-          if (value && (await trySession(value))) {
-            finish(true);
-            return;
-          }
-        } catch {}
-        if (captchaPopup?.closed) {
-          stopCaptchaPoll();
-          const value = await proxySession().catch(() => null);
-          if (value && (await trySession(value))) finish(true);
-        }
-      }, 1500);
+      if (!captchaPopup) fail("El navegador bloqueó la ventana emergente. Permite popups.");
+    });
+
+    captchaQuickBtn.addEventListener("click", () => {
+      switchTab("quick");
+      quickBtn.click();
     });
 
     for (const tab of tabs) {
-      tab.addEventListener("click", () => {
-        error.textContent = "";
-        const mode = tab.dataset.mode;
-        for (const t of tabs) t.classList.toggle("is-active", t === tab);
-        for (const p of panes) p.hidden = p.dataset.pane !== mode;
-      });
+      tab.addEventListener("click", () => switchTab(tab.dataset.mode));
     }
 
     for (const btn of cancelBtns) {
@@ -663,40 +777,14 @@ function askForSession(expired, { allowCancel = false } = {}) {
       if (!username || !password) return fail("Escribe tu usuario y contraseña.");
       passSubmit.disabled = true;
       captchaBox.hidden = true;
+      captchaFrame.hidden = true;
+      captchaFrame.removeAttribute("src");
+      activeCaptcha = null;
       try {
         const ctype = username.includes("@") ? "Email" : "Username";
-        const res = await robloxPostWithCsrf("https://auth.roblox.com/v2/login", {
-          ctype,
-          cvalue: username,
-          password,
-        });
-        if (res.status === 200 && res.json?.twoStepVerificationData?.ticket && res.json?.user?.id) {
-          twoStep = {
-            userId: res.json.user.id,
-            ticket: res.json.twoStepVerificationData.ticket,
-            mediaType: res.json.twoStepVerificationData.mediaType || "Email",
-          };
-          twofaHint.textContent = `Introduce el código de verificación (${twoStep.mediaType}) enviado a tu cuenta:`;
-          twofaBox.hidden = false;
-          twofaInput.focus();
-          passSubmit.textContent = "Verificar 2FA";
-          passSubmit.disabled = false;
-          return;
-        }
-        if (res.status === 200 && (await sessionAccepted())) {
-          finish(true);
-          return;
-        }
-        const challengeType = res.headers?.find(([k]) => k.toLowerCase() === "rblx-challenge-type")?.[1]?.toLowerCase() || "";
-        const apiMsg = res.json?.errors?.[0]?.message || "";
-        if (challengeType.includes("captcha") || /captcha|challenge/i.test(apiMsg)) {
-          captchaBox.hidden = false;
-          throw new Error("Roblox pidió verificación CAPTCHA.");
-        }
-        if (/incorrect|invalid/i.test(apiMsg)) {
-          throw new Error("Usuario o contraseña incorrectos.");
-        }
-        throw new Error(apiMsg || `Roblox rechazó el inicio de sesión (HTTP ${res.status}).`);
+        const creds = { ctype, cvalue: username, password };
+        const res = await robloxPostWithCsrf("https://auth.roblox.com/v2/login", creds);
+        await handleLoginResponse(res, creds);
       } catch (err) {
         forgetSession();
         fail(err.message || String(err));
@@ -719,6 +807,7 @@ function askForSession(expired, { allowCancel = false } = {}) {
         const { code, privateKey } = created.json;
         quickCode.hidden = false;
         quickCode.textContent = code;
+        quickLink.hidden = false;
         quickStatus.textContent = "Introduce este código en roblox.com/crossdevicelogin/ConfirmCode y apruébalo…";
 
         const poll = async () => {

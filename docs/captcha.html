@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Verificación de Roblox · Webblox</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%; background: #0e1322; color: #f3f6fc;
+      font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: grid; place-items: center; padding: 12px;
+    }
+    .wrap {
+      width: 100%; max-width: 360px; display: grid; justify-items: center; gap: 10px;
+      padding: 14px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 14px;
+      background: rgba(20, 26, 44, 0.85); text-align: center;
+    }
+    .status { font-size: 13px; color: #a6b0c3; }
+    .status.ok { color: #3ccb8b; }
+    .status.err { color: #ff6b74; }
+    #arkose-box {
+      min-height: 290px; width: 100%; display: grid; place-items: center;
+      overflow: hidden; border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p id="msg" class="status">Cargando verificación de Roblox…</p>
+    <div id="arkose-box"></div>
+  </div>
+  <script>
+    (function () {
+      var msg = document.getElementById("msg");
+      var hash = location.hash.startsWith("#") ? location.hash.slice(1) : location.hash;
+      var params = new URLSearchParams(hash);
+      var challengeId = params.get("id") || "";
+      var blob = params.get("blob") || "";
+      var pkey = params.get("pkey") || "476068BF-9607-4799-B53D-966BE98E2B81";
+
+      if (!/^[0-9A-F-]{36}$/i.test(pkey)) {
+        msg.textContent = "Clave de verificación inválida.";
+        msg.className = "status err";
+        return;
+      }
+
+      if (!blob) {
+        msg.textContent = "Faltan datos del desafío CAPTCHA.";
+        msg.className = "status err";
+        return;
+      }
+
+      function sendResult(payload) {
+        try {
+          if (window.parent && window.parent !== window) window.parent.postMessage(payload, "*");
+        } catch (e) {}
+        try {
+          if (window.opener) window.opener.postMessage(payload, "*");
+        } catch (e) {}
+      }
+
+      window.setupEnforcement = function (enforcement) {
+        enforcement.setConfig({
+          selector: "#arkose-box",
+          mode: "inline",
+          data: { blob: blob },
+          onReady: function () {
+            msg.textContent = "Completa el puzzle para continuar con tu inicio de sesión:";
+            msg.className = "status";
+            sendResult({ type: "blox-captcha-ready", challengeId: challengeId });
+          },
+          onShown: function () {
+            msg.textContent = "Completa la verificación para entrar:";
+            msg.className = "status";
+          },
+          onSuppress: function () {
+            msg.textContent = "Verificación automática completada…";
+          },
+          onCompleted: function (res) {
+            msg.textContent = "¡CAPTCHA completado! Iniciando sesión…";
+            msg.className = "status ok";
+            sendResult({
+              type: "blox-captcha-token",
+              challengeId: challengeId,
+              token: res && res.token ? String(res.token) : "",
+            });
+          },
+          onError: function (err) {
+            var text = (err && (err.error || err.message)) || "No se pudo cargar el CAPTCHA.";
+            msg.textContent = "Error: " + text;
+            msg.className = "status err";
+            sendResult({ type: "blox-captcha-error", challengeId: challengeId, error: String(text) });
+          },
+        });
+      };
+
+      var script = document.createElement("script");
+      script.src = "https://roblox-api.arkoselabs.com/v2/" + encodeURIComponent(pkey) + "/api.js";
+      script.async = true;
+      script.defer = true;
+      script.setAttribute("data-callback", "setupEnforcement");
+      script.onerror = function () {
+        msg.textContent = "No se pudo conectar con Arkose Labs. Revisa tu conexión o usa Código rápido.";
+        msg.className = "status err";
+      };
+      document.body.appendChild(script);
+    })();
+  </script>
+</body>
+</html>

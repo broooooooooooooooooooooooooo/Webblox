@@ -221,10 +221,15 @@ async function main() {
 
   builder.addExchange(`${origin}/blox/icon.png`, 200, responseHeaders("image/png"), makePngIcon(192));
 
+  const updateManifestUrl =
+    process.env.IWA_UPDATE_MANIFEST_URL ||
+    "https://raw.githubusercontent.com/broooooooooooooooooooooooooo/Webblox/main/swbn/update-manifest.json";
+
   const manifest = {
     name: "Webblox",
     short_name: "Webblox",
     version: process.env.SWBN_VERSION || "1.0.0",
+    update_manifest_url: updateManifestUrl,
     id: "/",
     start_url: "/blox/",
     scope: "/",
@@ -261,6 +266,7 @@ async function main() {
 
   console.log(`[swbn] Created ${OUT_FILE} (${(bytes.byteLength / 1048576).toFixed(2)} MiB)`);
   console.log(`[swbn] Isolated Web App Origin: ${origin}/blox/`);
+  console.log(`[swbn] Update Manifest URL: ${updateManifestUrl}`);
   if (!hasEngine) {
     console.warn("[swbn] Run `bun run fetch:webblox` before `bun run build:swbn` to include the engine.");
   }

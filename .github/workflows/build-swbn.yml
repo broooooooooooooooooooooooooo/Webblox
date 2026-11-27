@@ -39,6 +39,7 @@ jobs:
         env:
           IWA_SIGNING_KEY: ${{ secrets.IWA_SIGNING_KEY }}
           SWBN_VERSION: "1.0.${{ github.run_number }}"
+          IWA_UPDATE_MANIFEST_URL: "https://raw.githubusercontent.com/${{ github.repository }}/main/swbn/update-manifest.json"
         run: bun run build:swbn
 
       - name: Upload webblox.swbn artifact
@@ -48,13 +49,36 @@ jobs:
           path: swbn/dist/webblox.swbn
           retention-days: 14
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub Release & update update-manifest.json
         if: ${{ inputs.create_release != false }}
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: "1.0.${{ github.run_number }}"
+          REPO: ${{ github.repository }}
         run: |
-          TAG="iwa-v1.0.${{ github.run_number }}"
-          gh release create "$TAG" swbn/dist/webblox.swbn \
+          TAG="iwa-v${VERSION}"
+          export SRC="https://github.com/${REPO}/releases/download/${TAG}/webblox.swbn"
+
+          node -e '
+            const fs = require("node:fs");
+            const file = "swbn/update-manifest.json";
+            let data = { versions: [] };
+            try { data = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+            if (!Array.isArray(data.versions)) data.versions = [];
+            data.versions = data.versions.filter((v) => v && v.version !== process.env.VERSION);
+            data.versions.push({ version: process.env.VERSION, src: process.env.SRC });
+            fs.writeFileSync(file, JSON.stringify(data, null, 2) + "\n");
+          '
+
+          gh release create "$TAG" swbn/dist/webblox.swbn swbn/update-manifest.json \
             --latest \
             --title "Webblox IWA $TAG" \
-            --notes "Paquete autónomo .swbn para Chrome con Direct Sockets (sin backend externo)."
+            --notes "Paquete autónomo .swbn para Chrome con Direct Sockets (sin backend externo) y actualización automática vía update-manifest.json."
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add swbn/update-manifest.json
+          git commit -m "chore(swbn): actualizar update-manifest.json a ${VERSION} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
+
